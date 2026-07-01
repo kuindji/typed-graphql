@@ -20,9 +20,22 @@ test("parser rejects trailing unconsumed tokens instead of silently truncating",
     // A closing brace with no opener leaves an unconsumed token.
     type Doc = ParseDocument<"{ id } }">;
     expectTypeOf<IsErr<Doc>>().toEqualTypeOf<true>();
+
+    // ParseSelection also rejects trailing unconsumed tokens.
+    type Sel = ParseSelection<"id name }">;
+    expectTypeOf<IsErr<Sel>>().toEqualTypeOf<true>();
 });
 
 test("parser propagates tokenizer failure", () => {
     type Doc = ParseDocument<"{ id % }">;
+    expectTypeOf<IsErr<Doc>>().toEqualTypeOf<true>();
+
+    // ParseSelection also propagates tokenizer failure.
+    type Sel = ParseSelection<"id % name">;
+    expectTypeOf<IsErr<Sel>>().toEqualTypeOf<true>();
+});
+
+test("parser rejects empty documents", () => {
+    type Doc = ParseDocument<"">;
     expectTypeOf<IsErr<Doc>>().toEqualTypeOf<true>();
 });
