@@ -1,0 +1,63 @@
+{
+    "name": "@kuindji/typed-graphql",
+    "version": "0.0.0",
+    "description": "Type-level GraphQL query parser for TypeScript",
+    "author": "Ivan Kuindzhi",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/kuindji/typed-graphql"
+    },
+    "homepage": "https://github.com/kuindji/typed-graphql#readme",
+    "bugs": {
+        "url": "https://github.com/kuindji/typed-graphql/issues"
+    },
+    "keywords": [
+        "typescript",
+        "graphql",
+        "parser",
+        "type-level",
+        "ast",
+        "compile-time",
+        "type-safe",
+        "query",
+        "schema",
+        "types"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "typecheck:snc": "tsc -p tsconfig.strict-null-false.json --noEmit",
+        "build": "tsc -p tsconfig.build.json",
+        "test:dist": "npm run build && node scripts/dist-smoke.mjs",
+        "prepublishOnly": "npm test && npm run test:dist",
+        "test": "tsc --noEmit && npm run typecheck:snc && bun test"
+    },
+    "devDependencies": {
+        "@types/bun": "^1.3.3",
+        "typescript": "^6.0.0"
+    },
+    "engines": {
+        "node": ">=16.0.0"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
