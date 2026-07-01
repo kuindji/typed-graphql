@@ -35,21 +35,25 @@ type takeOptionalName<In extends any[]> = In extends [
     : _match<undefined, In>;
 
 export type takeValue<In extends any[], Const extends boolean> = In extends
-    [ Token.Float, ...infer InFloat ]
-    ? _match<{ kind: Kind.FLOAT; value: string; }, InFloat>
-    : In extends [ Token.Integer, ...infer InInt ]
-        ? _match<{ kind: Kind.INT; value: string; }, InInt>
-    : In extends [ Token.String, ...infer InString ]
-        ? _match<{ kind: Kind.STRING; value: string; block: false; }, InString>
-    : In extends [ Token.BlockString, ...infer InBlockString ] ? _match<
-            { kind: Kind.STRING; value: string; block: true; },
-            InBlockString
-        >
+    [ { kind: Token.Float; value: infer V; }, ...infer InFloat ]
+    ? _match<{ kind: Kind.FLOAT; value: V; }, InFloat>
+    : In extends [ { kind: Token.Integer; value: infer V; }, ...infer InInt ]
+        ? _match<{ kind: Kind.INT; value: V; }, InInt>
+    : In extends [ { kind: Token.String; value: infer V; }, ...infer InString ]
+        ? _match<{ kind: Kind.STRING; value: V; block: false; }, InString>
+    : In extends
+        [ { kind: Token.BlockString; value: infer V; }, ...infer InBlockString ]
+        ? _match<{ kind: Kind.STRING; value: V; block: true; }, InBlockString>
     : In extends [ { kind: Token.Name; name: "null"; }, ...infer InNull ]
         ? _match<{ kind: Kind.NULL; }, InNull>
-    : In extends
-        [ { kind: Token.Name; name: "true" | "false"; }, ...infer InBoolean ]
-        ? _match<{ kind: Kind.BOOLEAN; value: boolean; }, InBoolean>
+    : In extends [
+        { kind: Token.Name; name: infer B extends "true" | "false"; },
+        ...infer InBoolean,
+    ]
+        ? _match<
+            { kind: Kind.BOOLEAN; value: B extends "true" ? true : false; },
+            InBoolean
+        >
     : In extends [ { kind: Token.Name; name: infer Name; }, ...infer InName ]
         ? _match<{ kind: Kind.ENUM; value: Name; }, InName>
     : In extends [ Token.BracketOpen, ...infer InBracketOpen ]
@@ -69,12 +73,11 @@ export type takeValue<In extends any[], Const extends boolean> = In extends
     : void;
 
 export type takeString<In extends any[]> = In extends
-    [ Token.String, ...infer InString ]
-    ? _match<{ kind: Kind.STRING; value: string; block: false; }, InString>
-    : In extends [ Token.BlockString, ...infer InBlockString ] ? _match<
-            { kind: Kind.STRING; value: string; block: true; },
-            InBlockString
-        >
+    [ { kind: Token.String; value: infer V; }, ...infer InString ]
+    ? _match<{ kind: Kind.STRING; value: V; block: false; }, InString>
+    : In extends
+        [ { kind: Token.BlockString; value: infer V; }, ...infer InBlockString ]
+        ? _match<{ kind: Kind.STRING; value: V; block: true; }, InBlockString>
     : void;
 
 type takeListRec<Nodes extends any[], In extends any[], Const extends boolean> =

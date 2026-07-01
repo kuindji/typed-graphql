@@ -149,7 +149,9 @@ type scanNumber<In> = In extends `-${infer R}`
 
 // A `void` result is the error sentinel for an unterminated string: no closing
 // delimiter was found. The tokenizer turns that into a `TokenizeError` rather
-// than silently retokenizing the unterminated remainder as fresh source.
+// than silently retokenizing the unterminated remainder as fresh source. On
+// success returns the unconsumed remainder after the closing `"""`; the raw
+// inner text is recovered cheaply at the call site by suffix-subtraction.
 type skipBlockString<In> = In extends `${infer Hd}${'"""'}${infer In}`
     ? Hd extends `${string}${"\\"}` ? skipBlockString<In>
     : In
@@ -171,7 +173,8 @@ type lineTerminator = "\n" | "\r";
 // `\uXXXX` escape whose four characters are not all hex, a raw line terminator,
 // or an unterminated string (end of input before a closing quote). Unlike the
 // prior `Hd extends ...${"\\"}` check, this counts backslashes correctly, so a
-// literal escaped backslash (`"\\"`) terminates while `"\""` does not.
+// literal escaped backslash (`"\\"`) terminates while `"\""` does not. The raw
+// inner text is recovered cheaply at the call site by suffix-subtraction.
 type skipString<In> = In extends `"${infer Rest}` ? Rest
     : In extends `\\u${infer A}${infer B}${infer C}${infer D}${infer Rest}`
         ? A extends hexDigit
@@ -211,11 +214,38 @@ export interface DirectiveTokenNode<Name extends string = string> {
     name: Name;
 }
 
+// Literal tokens carry their raw source text (exactly as written — escapes are
+// not decoded, block strings are not dedented) so the parser can build AST
+// value nodes that preserve the literal instead of widening it to `string`.
+export interface StringTokenNode<Value extends string = string> {
+    kind: Token.String;
+    value: Value;
+}
+
+export interface BlockStringTokenNode<Value extends string = string> {
+    kind: Token.BlockString;
+    value: Value;
+}
+
+export interface IntTokenNode<Value extends string = string> {
+    kind: Token.Integer;
+    value: Value;
+}
+
+export interface FloatTokenNode<Value extends string = string> {
+    kind: Token.Float;
+    value: Value;
+}
+
 export type TokenNode =
     | Token
     | NameTokenNode
     | VarTokenNode
-    | DirectiveTokenNode;
+    | DirectiveTokenNode
+    | StringTokenNode
+    | BlockStringTokenNode
+    | IntTokenNode
+    | FloatTokenNode;
 
 interface _state<In extends string, Out extends TokenNode[]> {
     out: Out;
@@ -250,15 +280,32 @@ type tokenizeRec<State> =
         : In extends `]${infer R}` ? _state<R, [ ...Out, Token.BracketClose ]>
         : In extends `"""${infer R}`
             ? (skipBlockString<R> extends `${infer Rest}`
-                ? _state<Rest, [ ...Out, Token.BlockString ]>
+                // `R` is `Inner """ Rest`; strip the (fixed) closing `"""Rest`
+                // suffix to recover the verbatim inner text.
+                ? R extends `${infer V}${'"""'}${Rest}`
+                    ? _state<Rest, [ ...Out, BlockStringTokenNode<V> ]>
+                    : TokenizeError<In>
                 : TokenizeError<In>)
         : In extends `"${infer R}`
             ? (skipString<R> extends `${infer Rest}`
-                ? _state<Rest, [ ...Out, Token.String ]>
+                // `R` is `Inner " Rest`; strip the (fixed) closing `"Rest`
+                // suffix to recover the verbatim inner text.
+                ? R extends `${infer V}"${Rest}`
+                    ? _state<Rest, [ ...Out, StringTokenNode<V> ]>
+                    : TokenizeError<In>
                 : TokenizeError<In>)
         : In extends `-${digit}${string}` | `${digit}${string}`
-            ? (scanNumber<In> extends _num<infer K, infer R>
-                ? _state<R, [ ...Out, K ]>
+            ? (scanNumber<In> extends _num<infer K, infer R extends string>
+                // Recover the literal's raw text by stripping the (fixed) tail
+                // `R` off the front of `In`; the length uniquely determines the
+                // prefix, so the split is exact.
+                ? In extends `${infer Val}${R}`
+                    ? _state<R, [
+                        ...Out,
+                        K extends Token.Integer ? IntTokenNode<Val>
+                            : FloatTokenNode<Val>,
+                    ]>
+                    : TokenizeError<In>
                 : TokenizeError<In>)
         : In extends `$${infer R}`
             ? (R extends `${letter | "_"}${string}`
