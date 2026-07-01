@@ -32,7 +32,7 @@ export enum OperationTypeNode {
 }
 
 // Shared continuation shapes used by tokenizer + parser.
-export interface _match<Out, In extends any[]> {
+export interface _match<Out, In> {
     out: Out;
     in: In;
 }
