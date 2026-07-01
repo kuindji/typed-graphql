@@ -1,0 +1,10 @@
+{
+    "recordedAt": "2026-07-01",
+    "typescript": "6.0.3",
+    "headroomPct": 10,
+    "instantiations": 38650,
+    "types": 6079,
+    "symbols": 97754,
+    "memoryUsedK": 142939,
+    "checkTimeS": 0.16
+}

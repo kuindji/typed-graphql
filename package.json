@@ -48,7 +48,9 @@
         "build": "tsc -p tsconfig.build.json",
         "test:dist": "npm run build && node scripts/dist-smoke.mjs",
         "prepublishOnly": "npm test && npm run test:dist",
-        "test": "tsc --noEmit && npm run typecheck:snc && bun test"
+        "test": "tsc --noEmit && npm run typecheck:snc && bun test",
+        "perf": "node scripts/perf-budget.mjs",
+        "perf:update": "node scripts/perf-budget.mjs --update"
     },
     "devDependencies": {
         "@types/bun": "^1.3.3",
