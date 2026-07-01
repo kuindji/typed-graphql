@@ -17,6 +17,9 @@ applying the same type-level approach to GraphQL instead of SQL.
 > `ValidateGraphQL`, `GetReturnType`, and a `GraphQLSchema` type — will land in
 > subsequent work.
 
+See [GOALS.md](./GOALS.md) for the intended scope, migration plan, and design
+decisions.
+
 ## Development
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
