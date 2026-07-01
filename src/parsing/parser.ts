@@ -137,7 +137,10 @@ type _takeArgumentsRec<
     In extends any[],
     Const extends boolean,
 > = In extends [ Token.ParenClose, ...infer InParenClose ]
-    ? _match<Arguments, InParenClose>
+    // An argument list, when present, must be non-empty (spec §2.6): `f()` is a
+    // syntax error.
+    ? Arguments extends [] ? void
+    : _match<Arguments, InParenClose>
     : takeArgument<In, Const> extends
         _match<infer Argument, infer InArgument extends any[]>
         ? _takeArgumentsRec<[ ...Arguments, Argument ], InArgument, Const>
@@ -291,7 +294,11 @@ type _takeFragmentSpread<In extends any[]> = In extends [
         { kind: Token.Name; name: infer Name; },
         ...infer InName,
     ]
-        ? takeDirectives<InName, false> extends
+        // `on` is a reserved word, not a legal FragmentName — `... on` is only
+        // valid as the start of an inline fragment's type condition (handled by
+        // the branch above), never as a bare fragment spread.
+        ? Name extends "on" ? void
+        : takeDirectives<InName, false> extends
             _match<infer Directives, infer InDirectives extends any[]> ? _match<
                 {
                     kind: Kind.FRAGMENT_SPREAD;
@@ -326,7 +333,11 @@ type _takeSelectionRec<Selections extends any[], In extends any[]> =
         : _takeFragmentSpread<In> extends
             _match<infer Selection, infer InFragmentSpread extends any[]>
             ? _takeSelectionRec<[ ...Selections, Selection ], InFragmentSpread>
-        : In extends [ Token.BraceClose, ...infer InBraceClose ] ? _match<
+        : In extends [ Token.BraceClose, ...infer InBraceClose ]
+            // A selection set must contain at least one selection (spec §2.4):
+            // an immediate close (`{}`) is a syntax error, not an empty set.
+            ? Selections extends [] ? void
+            : _match<
                 { kind: Kind.SELECTION_SET; selections: Selections; },
                 InBraceClose
             >
@@ -390,7 +401,11 @@ type _takeVarDefinitionRec<Definitions extends any[], In extends any[]> =
     In extends [
         Token.ParenClose,
         ...infer In,
-    ] ? _match<Definitions, In>
+    ]
+        // A variable-definition list, when present, must be non-empty (spec
+        // §2.10): `query Q() { id }` is a syntax error.
+        ? Definitions extends [] ? void
+        : _match<Definitions, In>
         : takeVarDefinition<In> extends
             _match<infer Definition, infer In extends any[]>
             ? _takeVarDefinitionRec<[ ...Definitions, Definition ], In>
@@ -407,7 +422,11 @@ export type takeFragmentDefinition<In extends any[]> = In extends [
     { kind: Token.Name; name: infer Type; },
     ...infer InFragment,
 ]
-    ? takeDirectives<InFragment, true> extends
+    // `on` is a reserved word, not a legal FragmentName (spec §2.8): a fragment
+    // definition may not be named `on`, just as a fragment spread may not spread
+    // one (see `_takeFragmentSpread`).
+    ? Name extends "on" ? void
+    : takeDirectives<InFragment, true> extends
         _match<infer Directives, infer InDirectives extends any[]>
         ? takeSelectionSet<InDirectives> extends
             _match<infer SelectionSet, infer InSelectionSet extends any[]>

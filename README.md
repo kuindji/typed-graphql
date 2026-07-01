@@ -11,11 +11,12 @@ type-checks your code.
 This is a sibling of [`@kuindji/typed-sql`](https://github.com/kuindji/typed-sql),
 applying the same type-level approach to GraphQL instead of SQL.
 
-> **Status: scaffold.** The type-level engine is not implemented yet. This
-> repository currently contains only the project skeleton (build/test config
-> and a placeholder public entry point). The intended public API — e.g.
-> `ValidateGraphQL`, `GetReturnType`, and a `GraphQLSchema` type — will land in
-> subsequent work.
+> **Status: work in progress.** Phase 1 — the type-level parser — has landed:
+> `ParseGraphQL` (and `ParseSelection`) tokenize and parse an executable
+> document entirely in the type system, returning a typed AST or a
+> `GraphQLError`. Schema-aware validation and result-type inference — the
+> intended public API `ValidateGraphQL`, `GetReturnType`, and a `GraphQLSchema`
+> type — will land in subsequent work.
 
 See [GOALS.md](./GOALS.md) for the intended scope, migration plan, and design
 decisions.

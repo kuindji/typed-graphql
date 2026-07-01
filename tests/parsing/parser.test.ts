@@ -39,3 +39,26 @@ test("parser rejects empty documents", () => {
     type Doc = ParseDocument<"">;
     expectTypeOf<IsErr<Doc>>().toEqualTypeOf<true>();
 });
+
+test("parser rejects empty required productions", () => {
+    // Empty selection set.
+    expectTypeOf<IsErr<ParseDocument<"{}">>>().toEqualTypeOf<true>();
+    // Empty argument list.
+    expectTypeOf<IsErr<ParseDocument<"{ f() }">>>().toEqualTypeOf<true>();
+    // Empty variable-definition list.
+    expectTypeOf<IsErr<ParseDocument<"query Q() { id }">>>().toEqualTypeOf<true>();
+    // Empty bare selection.
+    expectTypeOf<IsErr<ParseSelection<"">>>().toEqualTypeOf<true>();
+});
+
+test("parser rejects the reserved fragment name `on`", () => {
+    expectTypeOf<IsErr<ParseSelection<"...on">>>().toEqualTypeOf<true>();
+
+    // A fragment *definition* may not be named `on` either.
+    expectTypeOf<IsErr<ParseDocument<"fragment on on User { id }">>>()
+        .toEqualTypeOf<true>();
+
+    // A legitimately-named fragment definition still parses.
+    expectTypeOf<IsErr<ParseDocument<"fragment F on User { id }">>>()
+        .toEqualTypeOf<false>();
+});
