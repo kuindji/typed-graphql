@@ -328,6 +328,31 @@ type ValidateValue<
             : never
         : GraphQLError<"INVALID_SCHEMA", "argument metadata must use GraphQLInput">;
 
+export type ValidateDefaultValue<
+    Value,
+    Wire extends string,
+    S = never,
+    Namespace extends string = string,
+> =
+    ValidateValue<
+        Value,
+        GraphQLInput<Wire, DefaultInputType<Wire>>,
+        S,
+        Namespace
+    > extends infer Validated
+        ? Validated extends GraphQLError ? Validated
+        : Validated extends ArgumentsSuccess<infer Uses>
+            ? [Uses] extends [never] ? Validated
+            : GraphQLError<
+                "SYNTAX_ERROR",
+                "variable default value must be constant"
+            >
+        : GraphQLError<
+            "SYNTAX_ERROR",
+            "could not validate variable default value"
+        >
+        : never;
+
 type RequiredArgumentKeys<Expected> = {
     [K in keyof Expected]:
         Expected[K] extends GraphQLInput<infer Wire, unknown>

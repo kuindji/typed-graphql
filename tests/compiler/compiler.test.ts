@@ -244,6 +244,57 @@ test("directive variables are collected and unused variables are rejected", () =
     >().toMatchTypeOf<{ code: "UNUSED_VARIABLE"; }>();
 });
 
+test("variable defaults are validated against declared input types", () => {
+    type NullableWithDefault =
+        'query Q($flag: Boolean = true) { search(filter: { ids: ["1"] }) @client(flag: $flag) }';
+
+    expectTypeOf<IsValidGraphQL<NullableWithDefault, AdvancedSchema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<GetVariables<NullableWithDefault, AdvancedSchema>>()
+        .toEqualTypeOf<{ flag?: boolean; }>();
+
+    type InputObjectDefault =
+        'query Q($filter: SearchFilter = { ids: ["1", 2] nested: { limit: 3 } status: OPEN }) { search(filter: $filter) }';
+
+    expectTypeOf<IsValidGraphQL<InputObjectDefault, AdvancedSchema>>()
+        .toEqualTypeOf<true>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            'query Q($flag: Boolean = "yes") { search(filter: { ids: ["1"] }) @client(flag: $flag) }',
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            'query Q($filter: SearchFilter = { ids: [false] }) { search(filter: $filter) }',
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            'query Q($status: Status = PENDING) { search(filter: { ids: ["1"] status: $status }) }',
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            'query Q($flag: Boolean = null) { search(filter: { ids: ["1"] }) @client(flag: $flag) }',
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "INVALID_VARIABLE_TYPE"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            'query Q($fallback: Boolean!, $flag: Boolean = $fallback) { search(filter: { ids: ["1"] }) @client(flag: $flag) }',
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+});
+
 test("concrete fragments must apply to the current type", () => {
     expectTypeOf<
         IsValidGraphQL<

@@ -2,9 +2,9 @@
     "recordedAt": "2026-07-01",
     "typescript": "6.0.3",
     "headroomPct": 10,
-    "instantiations": 345785,
-    "types": 32136,
-    "symbols": 109144,
-    "memoryUsedK": 195944,
-    "checkTimeS": 0.67
+    "instantiations": 384319,
+    "types": 34268,
+    "symbols": 110576,
+    "memoryUsedK": 222179,
+    "checkTimeS": 0.7
 }

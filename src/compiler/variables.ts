@@ -1,6 +1,11 @@
 import type { GraphQLError } from "../diagnostics.js";
 import type { GraphQLInput, GraphQLSchema } from "../schema.js";
-import type { TakeValue, VariableApplicationType, VariableUse } from "./arguments.js";
+import type {
+    TakeValue,
+    ValidateDefaultValue,
+    VariableApplicationType,
+    VariableUse,
+} from "./arguments.js";
 import type { DirectivesResult, TakeDirectives } from "./directives.js";
 import type {
     Match,
@@ -8,20 +13,24 @@ import type {
     TakeName,
 } from "./scanner.js";
 
+type VariableDefaultState = "none" | "null" | "value";
+
 interface VariableDefinition<
     Name extends string = string,
     Wire extends string = string,
-    HasDefault extends boolean = boolean,
+    Default extends VariableDefaultState = VariableDefaultState,
 > {
     name: Name;
     wire: Wire;
-    hasDefault: HasDefault;
+    default: Default;
 }
 
 interface VariablesSuccess<Definitions, Uses = never> {
     definitions: Definitions;
     uses: Uses;
 }
+
+type DefaultState<Value> = Value extends { kind: "null" } ? "null" : "value";
 
 type TakeTypeReference<S extends string> =
     SkipIgnored<S> extends `[${infer Rest}`
@@ -68,42 +77,61 @@ type ParseVariableDefinitions<
                         >
                             ? SkipIgnored<AfterType> extends `=${infer AfterEqual}`
                                 ? TakeValue<AfterEqual> extends Match<
-                                    unknown,
+                                    infer DefaultValue,
                                     infer AfterDefault extends string
                                 >
-                                    ? Schema extends GraphQLSchema
-                                        ? TakeDirectives<
-                                            AfterDefault,
-                                            Schema,
-                                            "VARIABLE_DEFINITION",
-                                            Namespace
-                                        > extends DirectivesResult<
-                                            infer AfterDirectives extends string,
-                                            boolean,
-                                            infer DirectiveUses
-                                        >
-                                        ? ParseVariableDefinitions<
-                                            AfterDirectives,
-                                            Schema,
-                                            Namespace,
-                                            Definitions | VariableDefinition<Name, Wire, true>,
-                                            Uses | DirectiveUses,
-                                            [unknown, ...Steps]
-                                        >
-                                        : TakeDirectives<
-                                            AfterDefault,
-                                            Schema,
-                                            "VARIABLE_DEFINITION",
-                                            Namespace
-                                        >
-                                        : ParseVariableDefinitions<
-                                            AfterDefault,
-                                            Schema,
-                                            Namespace,
-                                            Definitions | VariableDefinition<Name, Wire, true>,
-                                            Uses,
-                                            [unknown, ...Steps]
-                                        >
+                                    ? ValidateDefaultValue<
+                                        DefaultValue,
+                                        Wire,
+                                        Schema,
+                                        Namespace
+                                    > extends infer DefaultValidation
+                                        ? DefaultValidation extends GraphQLError
+                                            ? DefaultValidation
+                                        : Schema extends GraphQLSchema
+                                            ? TakeDirectives<
+                                                AfterDefault,
+                                                Schema,
+                                                "VARIABLE_DEFINITION",
+                                                Namespace
+                                            > extends DirectivesResult<
+                                                infer AfterDirectives extends string,
+                                                boolean,
+                                                infer DirectiveUses
+                                            >
+                                            ? ParseVariableDefinitions<
+                                                AfterDirectives,
+                                                Schema,
+                                                Namespace,
+                                                | Definitions
+                                                | VariableDefinition<
+                                                    Name,
+                                                    Wire,
+                                                    DefaultState<DefaultValue>
+                                                >,
+                                                Uses | DirectiveUses,
+                                                [unknown, ...Steps]
+                                            >
+                                            : TakeDirectives<
+                                                AfterDefault,
+                                                Schema,
+                                                "VARIABLE_DEFINITION",
+                                                Namespace
+                                            >
+                                            : ParseVariableDefinitions<
+                                                AfterDefault,
+                                                Schema,
+                                                Namespace,
+                                                | Definitions
+                                                | VariableDefinition<
+                                                    Name,
+                                                    Wire,
+                                                    DefaultState<DefaultValue>
+                                                >,
+                                                Uses,
+                                                [unknown, ...Steps]
+                                            >
+                                        : never
                                     : TakeValue<AfterEqual>
                                 : Schema extends GraphQLSchema
                                     ? TakeDirectives<
@@ -120,7 +148,7 @@ type ParseVariableDefinitions<
                                         AfterDirectives,
                                         Schema,
                                         Namespace,
-                                        Definitions | VariableDefinition<Name, Wire, false>,
+                                        Definitions | VariableDefinition<Name, Wire>,
                                         Uses | DirectiveUses,
                                         [unknown, ...Steps]
                                     >
@@ -134,7 +162,7 @@ type ParseVariableDefinitions<
                                         AfterType,
                                         Schema,
                                         Namespace,
-                                        Definitions | VariableDefinition<Name, Wire, false>,
+                                        Definitions | VariableDefinition<Name, Wire>,
                                         Uses,
                                         [unknown, ...Steps]
                                     >
@@ -147,20 +175,32 @@ type ParseVariableDefinitions<
 
 type StripNonNull<T extends string> = T extends `${infer Inner}!` ? Inner : T;
 
-type WireCompatible<Declared extends string, Expected extends string> =
+type WireCompatible<
+    Declared extends string,
+    Expected extends string,
+    Default extends VariableDefaultState,
+> =
     Declared extends Expected ? true
     : Declared extends `${infer DeclaredBase}!`
         ? DeclaredBase extends StripNonNull<Expected> ? true : false
-        : false;
+    : Expected extends `${infer ExpectedBase}!`
+        ? Default extends "value"
+            ? Declared extends ExpectedBase ? true : false
+            : false
+    : false;
 
 type UseError<Use, Definitions> =
     Use extends VariableUse<infer Name, infer Input>
         ? Extract<Definitions, { name: Name }> extends infer Definition
             ? [Definition] extends [never]
                 ? GraphQLError<"UNDECLARED_VARIABLE", `undeclared variable: $${Name}`>
-                : Definition extends VariableDefinition<Name, infer Wire, boolean>
+                : Definition extends VariableDefinition<
+                    Name,
+                    infer Wire,
+                    infer Default
+                >
                     ? Input extends GraphQLInput<infer ExpectedWire, unknown>
-                        ? WireCompatible<Wire, ExpectedWire> extends true ? never
+                        ? WireCompatible<Wire, ExpectedWire, Default> extends true ? never
                         : GraphQLError<
                             "INVALID_VARIABLE_TYPE",
                             `$${Name} (${Wire}) is incompatible with ${ExpectedWire}`
@@ -177,7 +217,7 @@ type UsedNames<Uses> =
     Uses extends VariableUse<infer Name, unknown> ? Name : never;
 
 type DefinedNames<Definitions> =
-    Definitions extends VariableDefinition<infer Name, string, boolean> ? Name : never;
+    Definitions extends VariableDefinition<infer Name, string, VariableDefaultState> ? Name : never;
 
 type UnusedNames<Definitions, Uses> =
     Exclude<DefinedNames<Definitions>, UsedNames<Uses>>;
@@ -190,10 +230,10 @@ type RequiredVariableNames<Uses, Definitions> = {
         Extract<Definitions, { name: Name }> extends VariableDefinition<
             Name,
             infer Wire,
-            infer HasDefault
+            infer Default
         >
             ? Wire extends `${string}!`
-                ? HasDefault extends true ? never : Name
+                ? Default extends "none" ? Name : never
                 : never
             : never;
 }[UsedNames<Uses>];
