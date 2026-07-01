@@ -381,6 +381,11 @@ export type takeVarDefinition<In extends any[]> = In extends [
     : void
     : void;
 
+// Note: like `_takeDocumentRec` above, this has no description production to
+// skip — a stray string inside a variable-definition list (e.g.
+// `query Q($x: Int "junk") { id }`) is not legitimate and must fall through
+// to `_match<Definitions, In>` with a nonempty `In` so it surfaces as
+// `INCOMPLETE_INPUT` rather than being silently discarded.
 type _takeVarDefinitionRec<Definitions extends any[], In extends any[]> =
     In extends [
         Token.ParenClose,
@@ -389,8 +394,6 @@ type _takeVarDefinitionRec<Definitions extends any[], In extends any[]> =
         : takeVarDefinition<In> extends
             _match<infer Definition, infer In extends any[]>
             ? _takeVarDefinitionRec<[ ...Definitions, Definition ], In>
-        : takeString<In> extends _match<infer _, infer In extends any[]>
-            ? _takeVarDefinitionRec<[ ...Definitions ], In>
         : _match<Definitions, In>;
 
 export type takeVarDefinitions<In extends any[]> = In extends
@@ -483,11 +486,18 @@ export type takeOperationDefinition<In extends any[]> =
             >
         : void;
 
-// Consumes fragment definitions, operation definitions, and (per the GraphQL
-// grammar's leniency here) bare strings between definitions, accumulating
+// Consumes fragment definitions and operation definitions, accumulating
 // `Definitions` until nothing more matches. Whatever remains in `In` at that
 // point is handed back to the caller — the public entry point below is the
 // one that decides whether a nonempty remainder is acceptable.
+//
+// Note: this parser handles executable documents only (operations and
+// fragments), never SDL, so there is no "description" string production to
+// skip here (unlike the reference parser this was ported from). A stray
+// string literal between/after definitions is not a legitimate production —
+// it must fall through to `_match<Definitions, In>` with a nonempty `In`, so
+// the public entry point reports it as `INCOMPLETE_INPUT` rather than
+// silently swallowing it.
 type _takeDocumentRec<Definitions extends any[], In extends any[]> =
     takeFragmentDefinition<In> extends
         _match<infer Definition, infer In extends any[]>
@@ -495,8 +505,6 @@ type _takeDocumentRec<Definitions extends any[], In extends any[]> =
         : takeOperationDefinition<In> extends
             _match<infer Definition, infer In extends any[]>
             ? _takeDocumentRec<[ ...Definitions, Definition ], In>
-        : takeString<In> extends _match<infer _, infer In extends any[]>
-            ? _takeDocumentRec<[ ...Definitions ], In>
         : _match<Definitions, In>;
 
 // ---------------------------------------------------------------------------
@@ -515,27 +523,30 @@ type _takeDocumentRec<Definitions extends any[], In extends any[]> =
 // match `any[]` and produce a vaguer diagnostic.
 // ---------------------------------------------------------------------------
 
+// consumed in Phase 2 (validation/inference)
 export type DocumentNodeLike = {
     kind: Kind.DOCUMENT;
     definitions: readonly any[];
 };
 
 export type ParseDocument<In extends string> = tokenize<In> extends
-    TokenizeError<infer Rest>
-    ? GraphQLError<"SYNTAX_ERROR", `unexpected token near: ${Rest}`>
-    : tokenize<In> extends infer Toks extends any[]
-        ? _takeDocumentRec<[], Toks> extends
-            _match<infer Defs extends any[], infer Rest2 extends any[]>
-            ? Rest2 extends [] // fully consumed?
-                ? Defs extends []
-                    ? GraphQLError<"SYNTAX_ERROR", "empty document">
-                : { kind: Kind.DOCUMENT; definitions: Defs; }
-            : GraphQLError<
-                "INCOMPLETE_INPUT",
-                "unconsumed tokens after document"
-            >
-        : GraphQLError<"SYNTAX_ERROR", "could not parse document">
-    : GraphQLError<"SYNTAX_ERROR", "could not tokenize document">;
+    infer Tok
+    ? Tok extends TokenizeError<infer Rest>
+        ? GraphQLError<"SYNTAX_ERROR", `unexpected token near: ${Rest}`>
+        : Tok extends infer Toks extends any[]
+            ? _takeDocumentRec<[], Toks> extends
+                _match<infer Defs extends any[], infer Rest2 extends any[]>
+                ? Rest2 extends [] // fully consumed?
+                    ? Defs extends []
+                        ? GraphQLError<"SYNTAX_ERROR", "empty document">
+                    : { kind: Kind.DOCUMENT; definitions: Defs; }
+                : GraphQLError<
+                    "INCOMPLETE_INPUT",
+                    "unconsumed tokens after document"
+                >
+            : GraphQLError<"SYNTAX_ERROR", "could not parse document">
+        : GraphQLError<"SYNTAX_ERROR", "could not tokenize document">
+    : never;
 
 // `ParseSelection` parses a *bare* selection (no surrounding braces, e.g. the
 // body one would write inside `{ ... }`) by appending a synthetic
@@ -543,16 +554,22 @@ export type ParseDocument<In extends string> = tokenize<In> extends
 // then requiring that synthetic close to be the last token consumed — i.e.
 // nothing of the real input may remain unconsumed either.
 export type ParseSelection<In extends string> = tokenize<In> extends
-    TokenizeError<infer Rest>
-    ? GraphQLError<"SYNTAX_ERROR", `unexpected token near: ${Rest}`>
-    : tokenize<In> extends infer Toks extends any[]
-        ? _takeSelectionRec<[], [ ...Toks, Token.BraceClose ]> extends _match<
-            { kind: Kind.SELECTION_SET; selections: infer Sels extends any[]; },
-            infer Rest2 extends any[]
-        > ? Rest2 extends [] ? Sels
-            : GraphQLError<
-                "INCOMPLETE_INPUT",
-                "unconsumed tokens after selection"
-            >
-        : GraphQLError<"SYNTAX_ERROR", "could not parse selection">
-    : GraphQLError<"SYNTAX_ERROR", "could not tokenize selection">;
+    infer Tok
+    ? Tok extends TokenizeError<infer Rest>
+        ? GraphQLError<"SYNTAX_ERROR", `unexpected token near: ${Rest}`>
+        : Tok extends infer Toks extends any[]
+            ? _takeSelectionRec<[], [ ...Toks, Token.BraceClose ]> extends
+                _match<
+                    {
+                        kind: Kind.SELECTION_SET;
+                        selections: infer Sels extends any[];
+                    },
+                    infer Rest2 extends any[]
+                > ? Rest2 extends [] ? Sels
+                    : GraphQLError<
+                        "INCOMPLETE_INPUT",
+                        "unconsumed tokens after selection"
+                    >
+                : GraphQLError<"SYNTAX_ERROR", "could not parse selection">
+            : GraphQLError<"SYNTAX_ERROR", "could not tokenize selection">
+        : never;

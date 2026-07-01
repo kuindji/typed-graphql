@@ -23,4 +23,14 @@ test("negative corpus: malformed documents produce diagnostics", () => {
     expectTypeOf<IsErr<ParseGraphQL<"{ id } garbage">>>().toEqualTypeOf<true>(); // trailing garbage
     expectTypeOf<IsErr<ParseGraphQL<"">>>().toEqualTypeOf<true>(); // empty
     expectTypeOf<IsErr<ParseSelection<"id name %">>>().toEqualTypeOf<true>(); // stray char in selection
+    // Stray string literals are not a legitimate production in an executable
+    // document (no SDL descriptions here) — they must not be silently
+    // consumed as skippable junk.
+    expectTypeOf<IsErr<ParseGraphQL<'{ id } "junk"'>>>().toEqualTypeOf<true>(); // trailing stray string
+    expectTypeOf<IsErr<ParseGraphQL<'"desc" query Q { id }'>>>().toEqualTypeOf<
+        true
+    >(); // leading stray string
+    expectTypeOf<
+        IsErr<ParseGraphQL<'query Q($x: Int "junk") { id }'>>
+    >().toEqualTypeOf<true>(); // stray string inside variable-definition list
 });

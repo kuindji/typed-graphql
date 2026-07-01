@@ -12,6 +12,7 @@ export interface GraphQLError<
     path?: Path;
 }
 
+// consumed in Phase 2 (validation/inference)
 export type IsGraphQLError<T> = T extends { readonly __graphqlError: true } ? true
     : false;
 
