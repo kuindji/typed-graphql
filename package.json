@@ -1,7 +1,7 @@
 {
     "name": "@kuindji/typed-graphql",
     "version": "0.0.0",
-    "description": "Type-level GraphQL query parser for TypeScript",
+    "description": "Compile-time GraphQL validation and type inference for TypeScript",
     "author": "Ivan Kuindzhi",
     "license": "MIT",
     "repository": {
@@ -15,9 +15,8 @@
     "keywords": [
         "typescript",
         "graphql",
-        "parser",
+        "compiler",
         "type-level",
-        "ast",
         "compile-time",
         "type-safe",
         "query",

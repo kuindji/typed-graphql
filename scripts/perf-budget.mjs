@@ -1,4 +1,4 @@
-// Perf-regression guard for the type-level parser.
+// Perf-regression guard for the type-level compiler.
 //
 // Runs `tsc --noEmit --extendedDiagnostics` over the whole project (tests
 // included) and compares the DETERMINISTIC compiler counters against the

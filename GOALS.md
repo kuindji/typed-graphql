@@ -2,148 +2,79 @@
 
 ## Purpose
 
-`@kuindji/typed-graphql` will provide compile-time GraphQL parsing,
-schema validation, and result-type inference for TypeScript string literals.
-It is intended to replace the type-level GraphQL implementation currently in
-TheFloorr's `packages/common/src/graphql` and make that functionality reusable
-outside TheFloorr.
+`@kuindji/typed-graphql` provides compile-time GraphQL syntax checking, schema
+validation, variables inference, and result-type inference for TypeScript string
+literals.
 
-The library should follow the same general model as `@kuindji/typed-sql`:
+The package is intended to make the useful type-level GraphQL behavior from
+TheFloorr reusable, but the implementation is not a port of TheFloorr's AST
+pipeline. The current direction follows the lessons from `@kuindji/typed-sql`:
+walk the source string directly, avoid token arrays and public ASTs, and keep
+the type-level work bounded.
+
+The core model:
 
 - consumers describe a schema as a TypeScript type;
 - queries remain ordinary string literals;
-- parsing, validation, and result inference happen in the TypeScript type
-  system;
-- no generated client or runtime schema is required for the core type-level
-  API.
+- validation and inference happen in the TypeScript type system;
+- no generated client or runtime schema is required for the core API;
+- unsupported or malformed syntax returns a structured diagnostic instead of
+  being silently accepted.
 
-## Initial source
+## Core public API
 
-The first implementation will be extracted and generalized from these
-TheFloorr modules:
-
-- `tokenizer.ts`: type-level GraphQL tokenization;
-- `parser.ts`: type-level document and selection parsing;
-- `matcher.ts`: validation and result inference against table and relation
-  types;
-- `aggregate.ts`: aggregate input/output inference and runtime selection
-  generation;
-- `api.ts`: the consuming API and its runtime query-building requirements.
-
-The parser and tokenizer were adapted from the Supabase client. They are a
-starting point, not the compatibility contract. The extracted implementation
-must be independently tested and hardened. In particular, the current matcher
-only handles a subset of the AST produced by the parser, and the current parser
-does not establish complete GraphQL-spec validation merely by producing an AST.
-
-## Goal 1: reusable type-level core
-
-Move GraphQL parsing, validation, and result-type inference from TheFloorr into
-this package.
-
-The public core should provide equivalents of:
+The public core provides:
 
 ```ts
-type Parsed = ParseGraphQL<Query>;
 type Validation = ValidateGraphQL<Query, Schema>;
 type Valid = IsValidGraphQL<Query, Schema>;
 type Result = GetReturnType<Query, Schema>;
 type Variables = GetVariables<Query, Schema>;
+
+type PartialValidation = ValidateSelection<Selection, Schema, "User">;
+type PartialResult = GetSelectionType<Selection, Schema, "User">;
 ```
 
-`ValidateGraphQL` should return `true` for a valid document or a branded,
-structured diagnostic for an invalid document. Diagnostics should include a
-stable code and message and may include the path to the failing field.
-`IsValidGraphQL` should reduce that result to `true | false` for consumers that
-only need a boolean.
+`ValidateGraphQL` returns `true` for a valid document or a branded
+`GraphQLError` for the first invalid construct. `IsValidGraphQL` reduces that
+to `true | false`. `GetReturnType` and `GetVariables` return `never` when the
+query cannot compile.
 
-The exact exported names may be refined during implementation. The required
-capabilities are:
+There is intentionally no public `ParseGraphQL`/AST API. A full AST was useful
+for early exploration, but it materially increases TypeScript instantiation
+cost and depth pressure. The compiler keeps only the source slices it needs:
+operation metadata, variable definitions, selection bodies, and fragment
+bodies.
 
-1. Tokenize a literal GraphQL string at compile time.
-2. Parse it into a type-level representation.
-3. Reject malformed syntax rather than silently accepting a parsed prefix.
-4. Validate selected fields and nested selections against the schema.
-5. Infer the returned object shape, including aliases, lists, and nullability.
-6. Produce structured error types for invalid fields, missing selections,
-   invalid operations, invalid parameters, and unsupported syntax.
-7. Avoid dependencies on TheFloorr types, Apollo, Hasura, or generated database
-   modules.
+## Required language support
 
-## Goal 2: full documents and partial selections
+The first usable core must support:
 
-The core must accept both:
-
-- complete GraphQL documents, including explicit query, mutation, and
-  subscription operations; and
-- partial selection syntax used by TheFloorr's `api.ts`, such as:
-
-```graphql
-id
-name
-user {
-  id
-}
-```
-
-Partial selections must use a separate API and identify an explicit root type
-because they do not identify an operation root themselves:
-
-```ts
-type Validation = ValidateSelection<Selection, Schema, "User">;
-type Result = GetSelectionType<Selection, Schema, "User">;
-```
-
-An unqualified root name resolves through `defaultSchema`; a name such as
-`"content.User"` selects another schema. A runtime builder carries this root
-context automatically.
-
-The target language includes, at minimum:
-
-- anonymous shorthand queries and named operations;
+- anonymous shorthand queries and named `query`, `mutation`, and `subscription`
+  operations;
+- operation selection by name when a document contains multiple operations;
 - variables and variable type declarations;
-- fields, arguments, and aliases;
-- directives;
-- named and inline fragments;
-- scalar, object, list, and null values;
-- query, mutation, and subscription result inference.
+- fields, arguments, aliases, nested selections, and relation nullability/list
+  wrappers;
+- named fragments and inline fragments;
+- built-in `@skip` and `@include` result-shape effects;
+- custom directives declared by the schema;
+- scalar, object, list, enum, boolean, null, string, and numeric literal
+  argument syntax;
+- full-document and partial-selection entry points.
 
-Support is only complete when syntax parsing and schema-aware validation agree.
-Parsing a construct without validating its semantics is an intermediate
-milestone, not finished support.
+Unsupported constructs must fail with an explicit `GraphQLError` rather than
+being ignored or widened silently. If a complexity cap is reached, the compiler
+should return a diagnostic such as `QUERY_TOO_COMPLEX` rather than pretending
+the query is valid.
 
-Argument and variable validation is part of the first usable release. It must:
-
-- reject unknown, duplicate, and missing required arguments;
-- validate literal argument values;
-- validate variable declarations and uses against field arguments;
-- reject incompatible GraphQL variable types;
-- infer the TypeScript object accepted as runtime variables.
-
-GraphQL wire types and TypeScript application types are separate concerns. A
-GraphQL input must be able to preserve both:
-
-```ts
-type UserId = string & { readonly __table: "User"; };
-
-type UserIdInput = GraphQLInput<"ID!", UserId>;
-```
-
-The first parameter describes GraphQL validation and coercion. The second
-describes the TypeScript value the consumer must provide. It defaults from the
-built-in or custom scalar map when no application-specific type is supplied.
-This allows branded identifiers to remain required at call sites even when
-their GraphQL wire representation is a standard scalar. An inline GraphQL
-literal cannot prove a narrower application type such as `UserId`, so strict
-validation must require a typed variable for that argument.
-
-## Goal 3: schema model
+## Schema model
 
 The schema preserves the familiar `@kuindji/typed-sql` nesting for plain output
 fields and adds separate metadata only where GraphQL requires it:
 
 ```ts
-type UserId = string & { readonly __table: "User"; };
+type UserId = string & { readonly __table: "User" };
 
 type Schema = {
     defaultSchema: "public";
@@ -153,7 +84,7 @@ type Schema = {
             Query: {};
             User: {
                 id: UserId;
-                email: string;
+                email: string | null;
             };
             Post: {
                 id: string;
@@ -204,152 +135,108 @@ type Schema = {
 };
 ```
 
-As in `typed-sql`, TypeScript property types should carry scalar and
-nullability information wherever that is sufficient.
-
 Object-valued fields live in `relations`. Relations are singular, non-null, and
 have non-null items by default. Optional `multiple`, `nullable`, and
 `itemNullable` flags express other GraphQL wrapping combinations.
 
 Field arguments live in a general `arguments` map because scalar and
-object-valued fields can both accept arguments. `inputs`, custom `scalars`,
-`enums`, abstract types, and custom `directives` are additive maps used only
-when a schema needs them.
+object-valued fields can both accept arguments.
 
-Full documents start from conventional `Query`, `Mutation`, and `Subscription`
-objects. The optional `rootTypes` map supports schemas that use different root
-type names. There is no separate `operations` map.
+GraphQL wire types and TypeScript application types are separate concerns:
 
-## Goal 4: syntax and server variants
+```ts
+type UserIdInput = GraphQLInput<"ID!", UserId>;
+```
 
-Standard GraphQL syntax belongs in the core and must not require an adapter.
-The compatibility target is the GraphQL September 2025 specification. Features
-may be delivered incrementally, but unsupported constructs must produce an
-explicit diagnostic instead of being silently accepted.
+The first parameter describes GraphQL validation and coercion. The second
+describes the TypeScript value the consumer must provide. This keeps branded
+identifiers required at call sites even when their GraphQL wire representation
+is a standard scalar. An inline GraphQL literal cannot prove a narrower
+application type such as `UserId`, so strict validation must require a typed
+variable for that argument.
 
-Commas are ignored tokens in standard GraphQL, so comma-heavy and comma-free
-documents use the same parser. Supabase JavaScript/PostgREST selection strings
-such as `id,email,posts(id,title)` are a different language and are outside the
-GraphQL core.
+## Compiler architecture
 
-The core must parse directive syntax generally. The first release must
-understand the result-shape effects of executable `@skip` and `@include`
-directives. A field controlled by a runtime condition is optional in the
-inferred result; a literal condition can be inferred exactly. Custom directives
-are valid when declared in the schema's optional `directives` map.
+The type-level core is a strict shallow compiler:
 
-Server- or framework-specific query-building conventions are isolated from the
-core. Examples include Hasura-style:
+1. Skip ignored GraphQL characters directly in the source string.
+2. Index the document into operation and fragment entries without constructing
+   token arrays or AST node trees.
+3. Select the target operation.
+4. Compile the selected operation body against the schema.
+5. Compile referenced fragment bodies lazily in the current type context.
+6. Validate arguments while collecting variable uses.
+7. Resolve operation variable declarations into the runtime variables object.
 
-- `_bool_exp`, `order_by`, and conflict inputs;
-- generated insert, update, and delete root fields;
-- aggregate selection shapes;
-- table naming and root-field naming conventions.
+Performance constraints are part of the design:
 
-Parsing, validation, and result inference do not use engine adapters. Adapters
-may generate schema metadata or provide complete engine-specific runtime
-builders, but must not change the meaning of standard GraphQL syntax.
+- do not materialize token arrays;
+- do not build nested AST object trees;
+- keep recursive workers chunked and resumable;
+- accumulate field results as flat unions and materialize object shapes through
+  mapped types;
+- prefer direct source slices and structural delimiters over character-by-
+  character work when possible;
+- gate regressions with `npm run perf`.
 
 ## Runtime query building
 
-Runtime query building is a first-class part of `typed-graphql`, following the
-model established by `typed-sql`. The initial builder will stabilize and
-professionalize the behavior proven by TheFloorr's `api.ts`.
-
-TheFloorr's `api.ts` demonstrates useful builder behavior:
-
-- build list and single-result queries from a partial selection;
-- build insert, update, and delete mutations;
-- construct filters, ordering, pagination, and conflict inputs;
-- build aggregate selections;
-- build subscriptions;
-- carry inferred result types through a fluent API.
-
-The package provides shared runtime infrastructure for:
+Runtime query building is a later layer. The core must stay transport-neutral.
+The builder should eventually provide:
 
 - immutable builder state;
-- selection handling;
 - operation and variable-definition assembly;
-- variable collection and serialization;
-- operation naming;
-- typed request objects and result extraction paths;
-- an injectable transport executor.
+- typed request objects containing `document`, `variables`, optional
+  `operationName`, and optional result path;
+- an injected executor boundary.
 
-An engine adapter provides its complete fluent builder using those helpers.
-The bundled Hasura builder owns Hasura-specific filters, ordering, pagination,
-CRUD mutations, aggregates, subscriptions, and generated naming conventions.
-Other engines may expose different fluent APIs while sharing the same parser,
-schema, request, and execution foundations.
-
-The first release should not impose a large universal adapter interface. The
-Hasura implementation should establish the helper boundary; a public adapter
-contract should be extracted only after another builder demonstrates which
-abstractions are genuinely shared.
-
-TheFloorr's implementation also contains application concerns that do not
-belong in this package:
-
-- Apollo client ownership;
-- authentication and JWT refresh;
-- retry and error-reporting policy;
-- response-cache behavior;
-- TheFloorr table, insert, primary-key, and relation modules.
-
-The builder must produce a transport-neutral typed request containing a
-document, variables, and optional operation name and result path. Execution is
-provided through an injected function. Transport and application lifecycle
-behavior remain consumer responsibilities.
+Apollo ownership, authentication, retry/caching policy, error reporting, and
+application lifecycle behavior remain consumer responsibilities.
 
 ## Delivery sequence
 
-### Phase 1: establish the core
+### Phase 1: AST-less core compiler
 
-- Port the tokenizer and parser with focused compile-time tests.
-- Define explicit parse failures and require complete input consumption.
-- Support both document and partial-selection entry points.
-- Remove TheFloorr path aliases and generated-type dependencies.
+- Define `GraphQLSchema`, `GraphQLInput`, and branded diagnostics.
+- Implement direct document indexing and selection compilation.
+- Validate fields, relations, arguments, fragments, directives, operation
+  roots, and variable declarations.
+- Collect variables used in built-in directive arguments.
+- Reject unused operation variable declarations.
+- Reject impossible concrete fragment type conditions.
+- Reject conflicting duplicate response keys.
+- Infer result and variables types.
+- Cover malformed syntax and schema errors with compile-time tests.
+- Establish and maintain a TypeScript perf baseline.
 
-### Phase 2: define schema validation and inference
-
-- Introduce the first `GraphQLSchema` contract based on the
-  `typed-sql`-style schema structure.
-- Port and generalize matcher behavior.
-- Infer aliases, nested objects, lists, and nullability.
-- Add structured diagnostics and boolean validation helpers.
-- Validate operation roots, arguments, branded runtime variable types,
-  fragments, directives, and selection rules.
-- Infer the runtime variables object.
-
-### Phase 3: prove migration compatibility
+### Phase 2: migration compatibility
 
 - Recreate representative TheFloorr selections as package tests.
 - Cover relations, nullable single relations, multiple relations, aggregates,
   and invalid field selections.
-- Replace TheFloorr's parser, tokenizer, and matcher imports with package
-  exports without weakening its current type safety.
+- Replace TheFloorr's local GraphQL type-level implementation with package
+  exports without weakening type safety.
 
-### Phase 4: build runtime construction
+### Phase 3: runtime construction
 
 - Extract reusable runtime builder helpers inside `typed-graphql`.
 - Build a transport-independent typed request and executor boundary.
 - Provide a stable Hasura builder based on TheFloorr's list, mutation,
   aggregate, and subscription behavior.
-- Keep Apollo, authentication, retry, caching, and error-reporting policy in
-  TheFloorr.
 
 ## Success criteria
 
 The goals in this document are achieved when:
 
-- TheFloorr no longer owns its GraphQL tokenizer, parser, or matcher.
-- Equivalent partial selections infer the same or stricter result types.
-- Full GraphQL documents can be parsed, validated, and inferred against a
-  documented schema type.
-- Invalid syntax and invalid schema selections produce stable, testable
-  compile-time failures.
-- Full-document arguments and variables are validated, and the runtime variable
-  object preserves application types such as branded identifiers.
-- The core has no runtime or application-framework dependency.
-- Runtime construction lives inside `typed-graphql` and the Hasura builder
-  produces requests equivalent to TheFloorr's existing API without owning its
-  transport or application lifecycle.
+- equivalent partial selections infer the same or stricter result types than
+  TheFloorr's current implementation;
+- full GraphQL documents are validated and inferred against a documented schema
+  type;
+- invalid syntax and invalid schema selections produce stable, testable
+  compile-time failures;
+- full-document arguments and variables are validated, and the runtime variable
+  object preserves application types such as branded identifiers;
+- the core has no runtime or application-framework dependency;
+- TypeScript perf remains bounded under the recorded budget;
+- runtime construction lives inside `typed-graphql` without owning transport or
+  application lifecycle concerns.
