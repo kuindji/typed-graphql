@@ -165,3 +165,73 @@ test("aliased aggregate fields with arguments", () => {
         };
     }>();
 });
+
+// Ported from userDefaultGraphs.ts `${Fragment}` string interpolation:
+// a selection assembled from composed `as const` fragments.
+const UserFields = "id givenName familyName email" as const;
+const ConsultationGraph = `
+    id
+    title
+    customer { ${UserFields} }
+    fri { ${UserFields} }
+` as const;
+
+test("selection composed from interpolated fragments", () => {
+    type Result = GetSelectionType<
+        typeof ConsultationGraph,
+        Schema,
+        "Consultation"
+    >;
+    expectTypeOf<Result>().toEqualTypeOf<{
+        id: string;
+        title: string | null;
+        customer: {
+            id: string;
+            givenName: string | null;
+            familyName: string | null;
+            email: string | null;
+        } | null;
+        fri: {
+            id: string;
+            givenName: string | null;
+            familyName: string | null;
+            email: string | null;
+        } | null;
+    }>();
+});
+
+// The builder wraps a selection in `query { Table { ...graph } }`; validate the
+// full-document path (`ValidateGraphQL` / `GetReturnType`) for a real graph.
+test("full document validates and infers a list root", () => {
+    type Query = `query {
+        Moodboard(limit: 10) {
+            id
+            name
+            productReferences { id position }
+        }
+    }`;
+    expectTypeOf<ValidateGraphQL<Query, Schema>>().toEqualTypeOf<true>();
+    expectTypeOf<GetReturnType<Query, Schema>>().toEqualTypeOf<{
+        Moodboard: {
+            id: string;
+            name: string | null;
+            productReferences: {
+                id: string;
+                position: number | null;
+            }[];
+        }[];
+    }>();
+});
+
+// Negative cases lifted from the shapes real code must reject.
+test("invalid selections surface explicit diagnostics", () => {
+    expectTypeOf<ValidateSelection<"id missingField", Schema, "Moodboard">>()
+        .toMatchTypeOf<{ code: "UNKNOWN_FIELD"; }>();
+    expectTypeOf<
+        ValidateSelection<"looks { missingField }", Schema, "Consultation">
+    >().toMatchTypeOf<{ code: "UNKNOWN_FIELD"; }>();
+    expectTypeOf<ValidateSelection<"customer", Schema, "Consultation">>()
+        .toMatchTypeOf<{ code: "MISSING_SELECTION"; }>();
+    expectTypeOf<ValidateSelection<"title { id }", Schema, "Consultation">>()
+        .toMatchTypeOf<{ code: "UNEXPECTED_SELECTION"; }>();
+});
