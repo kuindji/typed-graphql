@@ -63,9 +63,11 @@ type ScalarField<
     S extends GraphQLSchema,
     C extends TypeContext,
     Name extends string,
-> = SchemaType<S, C> extends infer Row
-    ? Name extends keyof Row ? Row[Name] : never
-    : never;
+> = Name extends "__typename"
+    ? PossibleRuntimeTypes<S, C>
+    : SchemaType<S, C> extends infer Row
+        ? Name extends keyof Row ? Row[Name] : never
+        : never;
 
 type RelationsFor<
     S extends GraphQLSchema,
@@ -149,13 +151,36 @@ type PossibleRuntimeTypes<
     ? C["name"]
     : AbstractPossibleTypes<S, C>;
 
-type Compact<S extends string> =
-    S extends `${infer A} ${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\n${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\r${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\t${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A},${infer B}` ? Compact<`${A}${B}`>
+type CompactPlain<S extends string> =
+    S extends `${infer A} ${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\n${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\r${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\t${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A},${infer B}` ? CompactPlain<`${A}${B}`>
     : S;
+
+type TakeQuotedBody<S extends string, Acc extends string = ""> =
+    S extends `${infer Body}"${infer Rest}`
+        ? Body extends `${string}\\`
+            ? TakeQuotedBody<Rest, `${Acc}${Body}"`>
+            : Match<`${Acc}${Body}`, Rest>
+        : Match<`${Acc}${S}`, "">;
+
+// Strips ignored tokens outside string literals only, so string arguments
+// keep their exact content when compared for field conflicts.
+type Compact<S extends string> =
+    S extends `${infer Before}"${infer After}`
+        ? After extends `""${infer BlockRest}`
+            ? BlockRest extends `${infer Body}"""${infer Rest}`
+                ? `${CompactPlain<Before>}"""${Body}"""${Compact<Rest>}`
+                : `${CompactPlain<Before>}"""${BlockRest}`
+            : TakeQuotedBody<After> extends Match<
+                infer Body extends string,
+                infer Rest extends string
+            >
+                ? `${CompactPlain<Before>}"${Body}"${Compact<Rest>}`
+                : never
+        : CompactPlain<S>;
 
 interface FieldHead<
     Alias extends string | undefined,
@@ -485,6 +510,56 @@ type CompileNamedFragment<
                 : never
         : never;
 
+type CompileInlineBody<
+    Source extends string,
+    S extends GraphQLSchema,
+    C extends TypeContext,
+    Target extends TypeContext,
+    Fragments,
+    Fields,
+    Visited extends string,
+    Steps extends unknown[],
+> = TakeDirectives<Source, S, "INLINE_FRAGMENT", C["namespace"]> extends DirectivesResult<
+    infer BeforeSelection extends string,
+    infer Optional extends boolean,
+    infer DirectiveUses
+>
+    ? TakeBraced<BeforeSelection> extends Match<
+        infer Selection extends string,
+        infer After extends string
+    >
+        ? RunSelection<
+            Selection,
+            S,
+            Target,
+            Fragments,
+            never,
+            Visited
+        > extends infer InlineResult
+            ? InlineResult extends SelectionSuccess<
+                infer InlineFields,
+                infer InlineUses
+            >
+                ? CompileSelectionWorker<
+                    After,
+                    S,
+                    C,
+                    Fragments,
+                    | Fields
+                    | OptionalIf<
+                        InlineFields,
+                        Optional,
+                        FragmentIsConditional<S, C, Target>
+                    >
+                    | SelectionUse<DirectiveUses | InlineUses>,
+                    Visited,
+                    [unknown, ...Steps]
+                >
+                : InlineResult
+            : never
+        : TakeBraced<BeforeSelection>
+    : TakeDirectives<Source, S, "INLINE_FRAGMENT", C["namespace"]>;
+
 type CompileSpread<
     S0 extends string,
     S extends GraphQLSchema,
@@ -493,64 +568,36 @@ type CompileSpread<
     Fields,
     Visited extends string,
     Steps extends unknown[],
-> = TakeName<S0> extends Match<
-    infer Name extends string,
-    infer Rest extends string
->
+> = SkipIgnored<S0> extends `${"@" | "{"}${string}`
+    ? CompileInlineBody<S0, S, C, C, Fragments, Fields, Visited, Steps>
+    : TakeName<S0> extends Match<
+        infer Name extends string,
+        infer Rest extends string
+    >
     ? Name extends "on"
         ? TakeName<Rest> extends Match<
             infer On extends string,
             infer AfterOn extends string
         >
-            ? TakeDirectives<AfterOn, S, "INLINE_FRAGMENT", C["namespace"]> extends DirectivesResult<
-                infer BeforeSelection extends string,
-                infer Optional extends boolean,
-                infer DirectiveUses
-            >
-                ? TakeBraced<BeforeSelection> extends Match<
-                    infer Selection extends string,
-                    infer After extends string
-                >
-                    ? ResolveType<On, C["namespace"]> extends infer Target extends TypeContext
-                        ? HasType<S, Target> extends true
-                            ? FragmentApplies<S, C, Target> extends true
-                                ? RunSelection<
-                                    Selection,
-                                    S,
-                                    Target,
-                                    Fragments,
-                                    never,
-                                    Visited
-                                > extends infer InlineResult
-                                    ? InlineResult extends SelectionSuccess<
-                                        infer InlineFields,
-                                        infer InlineUses
-                                    >
-                                        ? CompileSelectionWorker<
-                                            After,
-                                            S,
-                                            C,
-                                            Fragments,
-                                            | Fields
-                                            | OptionalIf<
-                                                InlineFields,
-                                                Optional,
-                                                FragmentIsConditional<S, C, Target>
-                                            >
-                                            | SelectionUse<DirectiveUses | InlineUses>,
-                                            Visited,
-                                            [unknown, ...Steps]
-                                        >
-                                        : InlineResult
-                                    : never
-                                : GraphQLError<
-                                    "FRAGMENT_TYPE_MISMATCH",
-                                    `inline fragment cannot apply to ${C["name"]}`
-                                >
-                            : GraphQLError<"UNKNOWN_TYPE", `unknown inline fragment type: ${On}`>
-                        : never
-                    : TakeBraced<BeforeSelection>
-                : TakeDirectives<AfterOn, S, "INLINE_FRAGMENT", C["namespace"]>
+            ? ResolveType<On, C["namespace"]> extends infer Target extends TypeContext
+                ? HasType<S, Target> extends true
+                    ? FragmentApplies<S, C, Target> extends true
+                        ? CompileInlineBody<
+                            AfterOn,
+                            S,
+                            C,
+                            Target,
+                            Fragments,
+                            Fields,
+                            Visited,
+                            Steps
+                        >
+                        : GraphQLError<
+                            "FRAGMENT_TYPE_MISMATCH",
+                            `inline fragment cannot apply to ${C["name"]}`
+                        >
+                    : GraphQLError<"UNKNOWN_TYPE", `unknown inline fragment type: ${On}`>
+                : never
             : TakeName<Rest>
         : TakeDirectives<Rest, S, "FRAGMENT_SPREAD", C["namespace"]> extends DirectivesResult<
             infer AfterDirectives extends string,

@@ -174,9 +174,48 @@ type EnumValues<
         : never
     : never;
 
+type BuiltInScalarName = "Int" | "Float" | "Boolean" | "String" | "ID";
+
+type ScalarAppType<
+    S,
+    Namespace extends string,
+    Name extends string,
+> = S extends GraphQLSchema
+    ? S extends { scalars: infer Scalars }
+        ? Namespace extends keyof Scalars
+            ? Name extends keyof Scalars[Namespace]
+                ? Scalars[Namespace][Name]
+                : Name extends keyof Scalars ? Scalars[Name] : never
+            : Name extends keyof Scalars ? Scalars[Name] : never
+        : never
+    : never;
+
+type CustomScalarLiteralCompatible<Value, App> =
+    [unknown] extends [App] ? true
+    : App extends string ? Value extends LiteralValue<"string"> ? true : false
+    : App extends number ? Value extends LiteralValue<"int" | "float"> ? true : false
+    : App extends boolean ? Value extends LiteralValue<"boolean"> ? true : false
+    : true;
+
+type ValidateCustomScalarValue<
+    Value,
+    Wire extends string,
+    App,
+    ScalarApp,
+> = CustomScalarLiteralCompatible<Value, ScalarApp> extends true
+    ? [ScalarApp] extends [App]
+        ? ArgumentsSuccess<never>
+        : GraphQLError<
+            "INVALID_ARGUMENT_VALUE",
+            "application-branded inputs require a variable"
+        >
+    : GraphQLError<
+        "INVALID_ARGUMENT_VALUE",
+        `literal is incompatible with ${Wire}`
+    >;
+
 type EnumLiteralAllowed<Values, Name extends string> =
-    [Values] extends [never] ? true
-    : [Values] extends [string] ? [Name] extends [Values] ? true : false
+    [Values] extends [string] ? [Name] extends [Values] ? true : false
     : Values extends readonly unknown[] ? Name extends Values[number] & string ? true : false
     : Name extends keyof Values ? true : false;
 
@@ -189,12 +228,19 @@ type ScalarLiteralCompatible<Value, Wire extends string> =
         ? Value extends LiteralValue<"int" | "float"> ? true : false
     : StripNonNull<Wire> extends "Boolean"
         ? Value extends LiteralValue<"boolean"> ? true : false
-    : StripNonNull<Wire> extends "String" | "ID"
+    : StripNonNull<Wire> extends "String"
+        ? Value extends LiteralValue<"string"> ? true : false
+    : StripNonNull<Wire> extends "ID"
         ? Value extends LiteralValue<"string" | "int"> ? true : false
     : false;
 
 type IsNarrowApplicationType<Wire extends string, App> =
     DefaultInputType<Wire> extends App ? false : true;
+
+type ListItemApp<Inner extends string, App> =
+    NonNullable<App> extends readonly (infer Item)[]
+        ? Item
+        : DefaultInputType<Inner>;
 
 type ValidateListValues<
     Source extends string,
@@ -287,13 +333,13 @@ type ValidateValue<
             ? Value extends LiteralValue<"list", infer Body extends string>
                 ? ValidateListValues<
                     Body,
-                    GraphQLInput<Inner, DefaultInputType<Inner>>,
+                    GraphQLInput<Inner, ListItemApp<Inner, App>>,
                     S,
                     Namespace
                 >
                 : ValidateValue<
                     Value,
-                    GraphQLInput<Inner, DefaultInputType<Inner>>,
+                    GraphQLInput<Inner, ListItemApp<Inner, App>>,
                     S,
                     Namespace
                 >
@@ -301,12 +347,23 @@ type ValidateValue<
             ? [Fields] extends [never]
                 ? EnumValues<S, Namespace, StripNonNull<Wire>> extends infer Values
                     ? Value extends LiteralValue<"enum", infer Name extends string>
-                        ? EnumLiteralAllowed<Values, Name> extends true
-                            ? ArgumentsSuccess<never>
-                            : GraphQLError<
-                                "INVALID_ARGUMENT_VALUE",
-                                `unknown enum value ${Name} for ${StripNonNull<Wire>}`
-                            >
+                        ? [Values] extends [never]
+                            ? StripNonNull<Wire> extends BuiltInScalarName
+                                ? GraphQLError<
+                                    "INVALID_ARGUMENT_VALUE",
+                                    `literal is incompatible with ${Wire}`
+                                >
+                                : ScalarAppType<S, Namespace, StripNonNull<Wire>> extends infer ScalarApp
+                                    ? [ScalarApp] extends [never]
+                                        ? ArgumentsSuccess<never>
+                                        : ValidateCustomScalarValue<Value, Wire, App, ScalarApp>
+                                    : never
+                            : EnumLiteralAllowed<Values, Name> extends true
+                                ? ArgumentsSuccess<never>
+                                : GraphQLError<
+                                    "INVALID_ARGUMENT_VALUE",
+                                    `unknown enum value ${Name} for ${StripNonNull<Wire>}`
+                                >
                     : ScalarLiteralCompatible<Value, Wire> extends true
                         ? IsNarrowApplicationType<Wire, App> extends true
                             ? GraphQLError<
@@ -314,10 +371,19 @@ type ValidateValue<
                                 "application-branded inputs require a variable"
                             >
                             : ArgumentsSuccess<never>
-                        : GraphQLError<
-                            "INVALID_ARGUMENT_VALUE",
-                            `literal is incompatible with ${Wire}`
-                        >
+                        : StripNonNull<Wire> extends BuiltInScalarName
+                            ? GraphQLError<
+                                "INVALID_ARGUMENT_VALUE",
+                                `literal is incompatible with ${Wire}`
+                            >
+                            : ScalarAppType<S, Namespace, StripNonNull<Wire>> extends infer ScalarApp
+                                ? [ScalarApp] extends [never]
+                                    ? GraphQLError<
+                                        "INVALID_ARGUMENT_VALUE",
+                                        `literal is incompatible with ${Wire}`
+                                    >
+                                    : ValidateCustomScalarValue<Value, Wire, App, ScalarApp>
+                                : never
                     : never
                 : Value extends LiteralValue<"object", infer Body extends string>
                     ? ValidateObjectFields<Body, Fields, S, Namespace>

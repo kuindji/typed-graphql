@@ -173,19 +173,34 @@ type ParseVariableDefinitions<
             : GraphQLError<"SYNTAX_ERROR", "expected variable definition">
         : never;
 
-type StripNonNull<T extends string> = T extends `${infer Inner}!` ? Inner : T;
+// Spec `AreTypesCompatible` (§5.8.5): non-null variables can flow into
+// nullable locations, recursing into list item types.
+type TypeCompatible<
+    Declared extends string,
+    Expected extends string,
+> =
+    Expected extends `${infer ExpectedBase}!`
+        ? Declared extends `${infer DeclaredBase}!`
+            ? TypeCompatible<DeclaredBase, ExpectedBase>
+            : false
+    : Declared extends `${infer DeclaredBase}!`
+        ? TypeCompatible<DeclaredBase, Expected>
+    : Expected extends `[${infer ExpectedItem}]`
+        ? Declared extends `[${infer DeclaredItem}]`
+            ? TypeCompatible<DeclaredItem, ExpectedItem>
+            : false
+    : Declared extends `[${string}]` ? false
+    : Declared extends Expected ? true : false;
 
 type WireCompatible<
     Declared extends string,
     Expected extends string,
     Default extends VariableDefaultState,
 > =
-    Declared extends Expected ? true
-    : Declared extends `${infer DeclaredBase}!`
-        ? DeclaredBase extends StripNonNull<Expected> ? true : false
+    TypeCompatible<Declared, Expected> extends true ? true
     : Expected extends `${infer ExpectedBase}!`
         ? Default extends "value"
-            ? Declared extends ExpectedBase ? true : false
+            ? TypeCompatible<Declared, ExpectedBase>
             : false
     : false;
 

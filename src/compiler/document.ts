@@ -77,12 +77,17 @@ type ParseOperationBody<
     Variables extends string | undefined = undefined,
     DirectiveUses = never,
 > = SkipIgnored<S> extends `(${string}`
-    ? TakeParenthesized<S> extends Match<
-        infer Vars extends string,
-        infer Rest extends string
-    >
-        ? ParseOperationBody<Rest, Schema, Name, Kind, Operations, Fragments, Vars, DirectiveUses>
-        : TakeParenthesized<S>
+    ? Variables extends undefined
+        ? TakeParenthesized<S> extends Match<
+            infer Vars extends string,
+            infer Rest extends string
+        >
+            ? ParseOperationBody<Rest, Schema, Name, Kind, Operations, Fragments, Vars, DirectiveUses>
+            : TakeParenthesized<S>
+        : GraphQLError<
+            "SYNTAX_ERROR",
+            "operation has multiple variable definition lists"
+        >
     : TakeDirectives<
         S,
         Schema,
@@ -199,7 +204,14 @@ type IndexDocument<
 > =
     SkipIgnored<S> extends infer Start extends string
         ? Start extends ""
-            ? DocumentIndex<Operations, Fragments>
+            ? HasNamed<Operations, undefined> extends true
+                ? true extends IsUnion<Operations>
+                    ? GraphQLError<
+                        "LONE_ANONYMOUS_OPERATION",
+                        "an anonymous operation must be the only operation"
+                    >
+                    : DocumentIndex<Operations, Fragments>
+                : DocumentIndex<Operations, Fragments>
             : Start extends `{${string}`
                 ? HasNamed<Operations, undefined> extends true
                     ? GraphQLError<"DUPLICATE_OPERATION", "multiple anonymous operations">
