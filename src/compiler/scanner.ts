@@ -16,9 +16,17 @@ type NameStart = Letter | "_";
 type NameContinue = NameStart | Digit;
 type Ignored = " " | "\n" | "\r" | "\t" | "," | "\ufeff";
 
+// Comments end at any line terminator (spec §2.1.2): a `\r` before the first
+// `\n` terminates the comment on its own.
 export type SkipIgnored<S extends string> =
-    S extends `#${infer _Comment}\n${infer Rest}` ? SkipIgnored<Rest>
-    : S extends `#${string}` ? ""
+    S extends `#${infer Comment}\n${infer Rest}`
+        ? Comment extends `${string}\r${infer AfterCr}`
+            ? SkipIgnored<`${AfterCr}\n${Rest}`>
+            : SkipIgnored<Rest>
+    : S extends `#${infer Comment}`
+        ? Comment extends `${string}\r${infer AfterCr}`
+            ? SkipIgnored<AfterCr>
+            : ""
     : S extends `${Ignored}${infer Rest}` ? SkipIgnored<Rest>
     : S;
 
@@ -77,14 +85,50 @@ type DriveString<R> =
         ? DriveString<TakeStringBody<S, Acc>>
         : R;
 
-type TakeBlockStringBody<S extends string> =
-    S extends `${infer Body}${'"""'}${infer Rest}` ? Match<Body, Rest>
+// A `"""` preceded by `\` is the block-string escape (spec §2.9.4), not the
+// terminator; the escape is kept verbatim in the body.
+type TakeBlockStringBody<S extends string, Acc extends string = ""> =
+    S extends `${infer Body}${'"""'}${infer Rest}`
+        ? Body extends `${string}\\`
+            ? TakeBlockStringBody<Rest, `${Acc}${Body}"""`>
+            : Match<`${Acc}${Body}`, Rest>
     : GraphQLError<"SYNTAX_ERROR", "unterminated block string literal">;
 
 export type TakeString<S extends string> =
     SkipIgnored<S> extends `"""${infer Rest}` ? TakeBlockStringBody<Rest>
     : SkipIgnored<S> extends `"${infer Rest}` ? DriveString<TakeStringBody<Rest>>
     : GraphQLError<"UNEXPECTED_TOKEN", "expected string literal">;
+
+type CompactPlain<S extends string> =
+    S extends `${infer A} ${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\n${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\r${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A}\t${infer B}` ? CompactPlain<`${A}${B}`>
+    : S extends `${infer A},${infer B}` ? CompactPlain<`${A}${B}`>
+    : S;
+
+type TakeQuotedBody<S extends string, Acc extends string = ""> =
+    S extends `${infer Body}"${infer Rest}`
+        ? Body extends `${string}\\`
+            ? TakeQuotedBody<Rest, `${Acc}${Body}"`>
+            : Match<`${Acc}${Body}`, Rest>
+        : Match<`${Acc}${S}`, "">;
+
+// Strips ignored tokens outside string literals only, so string arguments
+// keep their exact content when compared for field conflicts.
+export type Compact<S extends string> =
+    S extends `${infer Before}"${infer After}`
+        ? After extends `""${infer BlockRest}`
+            ? BlockRest extends `${infer Body}"""${infer Rest}`
+                ? `${CompactPlain<Before>}"""${Body}"""${Compact<Rest>}`
+                : `${CompactPlain<Before>}"""${BlockRest}`
+            : TakeQuotedBody<After> extends Match<
+                infer Body extends string,
+                infer Rest extends string
+            >
+                ? `${CompactPlain<Before>}"${Body}"${Compact<Rest>}`
+                : never
+        : CompactPlain<S>;
 
 type Pop<T extends unknown[]> = T extends [unknown, ...infer Rest] ? Rest : [];
 
@@ -98,9 +142,13 @@ type DelimitedWorker<
 > = Steps["length"] extends 120
     ? { __chunk: [S, Depth, Acc] }
     : S extends `#${infer Comment}\n${infer Rest}`
-        ? DelimitedWorker<Rest, Open, Close, Depth, `${Acc}#${Comment}\n`, [unknown, ...Steps]>
+        ? Comment extends `${infer BeforeCr}\r${infer AfterCr}`
+            ? DelimitedWorker<`${AfterCr}\n${Rest}`, Open, Close, Depth, `${Acc}#${BeforeCr}\r`, [unknown, ...Steps]>
+            : DelimitedWorker<Rest, Open, Close, Depth, `${Acc}#${Comment}\n`, [unknown, ...Steps]>
     : S extends `#${infer Comment}`
-        ? GraphQLError<"SYNTAX_ERROR", `unterminated ${Open}${Close} group after comment ${Comment}`>
+        ? Comment extends `${infer BeforeCr}\r${infer AfterCr}`
+            ? DelimitedWorker<AfterCr, Open, Close, Depth, `${Acc}#${BeforeCr}\r`, [unknown, ...Steps]>
+            : GraphQLError<"SYNTAX_ERROR", `unterminated ${Open}${Close} group after comment ${Comment}`>
     : S extends `"""${infer Rest}`
         ? TakeBlockStringBody<Rest> extends Match<infer Body extends string, infer R extends string>
             ? DelimitedWorker<R, Open, Close, Depth, `${Acc}"""${Body}"""`, [unknown, ...Steps]>

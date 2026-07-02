@@ -1,7 +1,7 @@
 import type { GraphQLError } from "../diagnostics.js";
 import type { GraphQLInput, GraphQLSchema } from "../schema.js";
 import type { ArgumentUses, ValidateArguments } from "./arguments.js";
-import type { Match, SkipIgnored, TakeName, TakeParenthesized } from "./scanner.js";
+import type { Compact, Match, SkipIgnored, TakeName, TakeParenthesized } from "./scanner.js";
 
 export interface DirectivesResult<
     Rest extends string,
@@ -12,14 +12,6 @@ export interface DirectivesResult<
     optional: Optional;
     uses: Uses;
 }
-
-type Compact<S extends string> =
-    S extends `${infer A} ${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\n${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\r${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A}\t${infer B}` ? Compact<`${A}${B}`>
-    : S extends `${infer A},${infer B}` ? Compact<`${A}${B}`>
-    : S;
 
 type DirectiveOptional<Name extends string, Args extends string> =
     Name extends "skip"
@@ -100,7 +92,9 @@ export type TakeDirectives<
                         infer Args extends string,
                         infer AfterArgs extends string
                     >
-                        ? ValidateArguments<
+                        ? SkipIgnored<Args> extends ""
+                            ? GraphQLError<"SYNTAX_ERROR", "argument list cannot be empty">
+                        : ValidateArguments<
                             Args,
                             DirectiveArgs<Name, S, Namespace>,
                             S,

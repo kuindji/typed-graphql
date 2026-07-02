@@ -8,6 +8,7 @@ import type { ArgumentUses, ValidateArguments } from "./arguments.js";
 import type { DirectivesResult, TakeDirectives } from "./directives.js";
 import type { FragmentEntry } from "./document.js";
 import type {
+    Compact,
     Match,
     SkipIgnored,
     TakeBraced,
@@ -150,37 +151,6 @@ type PossibleRuntimeTypes<
 > = [AbstractPossibleTypes<S, C>] extends [never]
     ? C["name"]
     : AbstractPossibleTypes<S, C>;
-
-type CompactPlain<S extends string> =
-    S extends `${infer A} ${infer B}` ? CompactPlain<`${A}${B}`>
-    : S extends `${infer A}\n${infer B}` ? CompactPlain<`${A}${B}`>
-    : S extends `${infer A}\r${infer B}` ? CompactPlain<`${A}${B}`>
-    : S extends `${infer A}\t${infer B}` ? CompactPlain<`${A}${B}`>
-    : S extends `${infer A},${infer B}` ? CompactPlain<`${A}${B}`>
-    : S;
-
-type TakeQuotedBody<S extends string, Acc extends string = ""> =
-    S extends `${infer Body}"${infer Rest}`
-        ? Body extends `${string}\\`
-            ? TakeQuotedBody<Rest, `${Acc}${Body}"`>
-            : Match<`${Acc}${Body}`, Rest>
-        : Match<`${Acc}${S}`, "">;
-
-// Strips ignored tokens outside string literals only, so string arguments
-// keep their exact content when compared for field conflicts.
-type Compact<S extends string> =
-    S extends `${infer Before}"${infer After}`
-        ? After extends `""${infer BlockRest}`
-            ? BlockRest extends `${infer Body}"""${infer Rest}`
-                ? `${CompactPlain<Before>}"""${Body}"""${Compact<Rest>}`
-                : `${CompactPlain<Before>}"""${BlockRest}`
-            : TakeQuotedBody<After> extends Match<
-                infer Body extends string,
-                infer Rest extends string
-            >
-                ? `${CompactPlain<Before>}"${Body}"${Compact<Rest>}`
-                : never
-        : CompactPlain<S>;
 
 interface FieldHead<
     Alias extends string | undefined,

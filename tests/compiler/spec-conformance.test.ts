@@ -73,6 +73,22 @@ type Schema = {
             };
         };
     };
+    directives: {
+        public: {
+            check: {
+                arguments: {
+                    when: GraphQLInput<"Boolean">;
+                };
+                locations: "VARIABLE_DEFINITION";
+            };
+            trace: {
+                arguments: {
+                    tag: GraphQLInput<"String">;
+                };
+                locations: "FIELD";
+            };
+        };
+    };
 };
 
 test("a second variable definition list is a syntax error", () => {
@@ -168,6 +184,46 @@ test("variables inside list literals keep the argument's branded type", () => {
     expectTypeOf<IsValidGraphQL<Query, Schema>>().toEqualTypeOf<true>();
     expectTypeOf<GetVariables<Query, Schema>>()
         .toEqualTypeOf<{ one: UserId }>();
+});
+
+test("comments end at a lone carriage return, not only at newline", () => {
+    expectTypeOf<IsValidGraphQL<"# lead\r{ version }", Schema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<IsValidGraphQL<"{ version # trailing\r echo }", Schema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<IsValidGraphQL<"{ version # crlf\r\n echo }", Schema>>()
+        .toEqualTypeOf<true>();
+});
+
+test('block strings treat \\""" as an escaped triple-quote', () => {
+    expectTypeOf<
+        IsValidGraphQL<'{ echo(text: """say \\"""hi\\""" done""") }', Schema>
+    >().toEqualTypeOf<true>();
+});
+
+test("variable definition directives require constant arguments", () => {
+    type ConstViolation =
+        "query Q($flag: Boolean! = true @check(when: $flag)) { version }";
+
+    expectTypeOf<IsValidGraphQL<ConstViolation, Schema>>()
+        .toEqualTypeOf<false>();
+    expectTypeOf<ValidateGraphQL<ConstViolation, Schema>>()
+        .toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+
+    type ConstOk =
+        "query Q($flag: Boolean! @check(when: true)) { ... @include(if: $flag) { version } }";
+
+    expectTypeOf<IsValidGraphQL<ConstOk, Schema>>().toEqualTypeOf<true>();
+});
+
+test("directive argument lists cannot be empty", () => {
+    expectTypeOf<ValidateGraphQL<"{ version @trace() }", Schema>>()
+        .toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+
+    expectTypeOf<IsValidGraphQL<'{ version @trace(tag: "x") }', Schema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<IsValidGraphQL<"{ version @trace }", Schema>>()
+        .toEqualTypeOf<true>();
 });
 
 test("bare-word literals are rejected for built-in scalar arguments", () => {

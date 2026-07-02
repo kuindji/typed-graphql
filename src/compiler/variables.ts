@@ -53,6 +53,52 @@ type TakeTypeReference<S extends string> =
                 : Match<Name, Rest>
             : TakeName<S>;
 
+// Directives on a variable definition are Directives[Const] (spec §5.8):
+// their arguments cannot reference variables. Shared tail for the
+// default/no-default branches of ParseVariableDefinitions.
+type ContinueVariableDefinitions<
+    After extends string,
+    Schema,
+    Namespace extends string,
+    Definitions,
+    Uses,
+    Steps extends unknown[],
+> = Schema extends GraphQLSchema
+    ? TakeDirectives<
+        After,
+        Schema,
+        "VARIABLE_DEFINITION",
+        Namespace
+    > extends infer Directives
+        ? Directives extends DirectivesResult<
+            infer AfterDirectives extends string,
+            boolean,
+            infer DirectiveUses
+        >
+            ? [DirectiveUses] extends [never]
+                ? ParseVariableDefinitions<
+                    AfterDirectives,
+                    Schema,
+                    Namespace,
+                    Definitions,
+                    Uses,
+                    [unknown, ...Steps]
+                >
+                : GraphQLError<
+                    "SYNTAX_ERROR",
+                    "variable definition directive arguments must be constant"
+                >
+            : Directives
+        : never
+    : ParseVariableDefinitions<
+        After,
+        Schema,
+        Namespace,
+        Definitions,
+        Uses,
+        [unknown, ...Steps]
+    >;
+
 type ParseVariableDefinitions<
     S extends string,
     Schema = never,
@@ -88,37 +134,7 @@ type ParseVariableDefinitions<
                                     > extends infer DefaultValidation
                                         ? DefaultValidation extends GraphQLError
                                             ? DefaultValidation
-                                        : Schema extends GraphQLSchema
-                                            ? TakeDirectives<
-                                                AfterDefault,
-                                                Schema,
-                                                "VARIABLE_DEFINITION",
-                                                Namespace
-                                            > extends DirectivesResult<
-                                                infer AfterDirectives extends string,
-                                                boolean,
-                                                infer DirectiveUses
-                                            >
-                                            ? ParseVariableDefinitions<
-                                                AfterDirectives,
-                                                Schema,
-                                                Namespace,
-                                                | Definitions
-                                                | VariableDefinition<
-                                                    Name,
-                                                    Wire,
-                                                    DefaultState<DefaultValue>
-                                                >,
-                                                Uses | DirectiveUses,
-                                                [unknown, ...Steps]
-                                            >
-                                            : TakeDirectives<
-                                                AfterDefault,
-                                                Schema,
-                                                "VARIABLE_DEFINITION",
-                                                Namespace
-                                            >
-                                            : ParseVariableDefinitions<
+                                            : ContinueVariableDefinitions<
                                                 AfterDefault,
                                                 Schema,
                                                 Namespace,
@@ -129,43 +145,18 @@ type ParseVariableDefinitions<
                                                     DefaultState<DefaultValue>
                                                 >,
                                                 Uses,
-                                                [unknown, ...Steps]
+                                                Steps
                                             >
                                         : never
                                     : TakeValue<AfterEqual>
-                                : Schema extends GraphQLSchema
-                                    ? TakeDirectives<
-                                        AfterType,
-                                        Schema,
-                                        "VARIABLE_DEFINITION",
-                                        Namespace
-                                    > extends DirectivesResult<
-                                        infer AfterDirectives extends string,
-                                        boolean,
-                                        infer DirectiveUses
-                                    >
-                                    ? ParseVariableDefinitions<
-                                        AfterDirectives,
-                                        Schema,
-                                        Namespace,
-                                        Definitions | VariableDefinition<Name, Wire>,
-                                        Uses | DirectiveUses,
-                                        [unknown, ...Steps]
-                                    >
-                                    : TakeDirectives<
-                                        AfterType,
-                                        Schema,
-                                        "VARIABLE_DEFINITION",
-                                        Namespace
-                                    >
-                                    : ParseVariableDefinitions<
-                                        AfterType,
-                                        Schema,
-                                        Namespace,
-                                        Definitions | VariableDefinition<Name, Wire>,
-                                        Uses,
-                                        [unknown, ...Steps]
-                                    >
+                                : ContinueVariableDefinitions<
+                                    AfterType,
+                                    Schema,
+                                    Namespace,
+                                    Definitions | VariableDefinition<Name, Wire>,
+                                    Uses,
+                                    Steps
+                                >
                             : TakeTypeReference<AfterColon>
                         : GraphQLError<"SYNTAX_ERROR", `expected : after $${Name}`>
                     : GraphQLError<"DUPLICATE_VARIABLE", `duplicate variable: ${Name}`>
