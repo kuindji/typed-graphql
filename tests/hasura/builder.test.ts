@@ -150,6 +150,16 @@ test("count() resolves the aggregate count object", async () => {
     expectTypeOf(result).toEqualTypeOf<{ aggregate: { count: number; }; }>();
 });
 
+test("aggregate mode threads limit and offset instead of dropping them", async () => {
+    const mock = createMockExecutor({
+        User_aggregate: { aggregate: { count: 2 } },
+    });
+    await userBuilder(mock.executor).limit(5).offset(10).count();
+    expect(mock.requests[0]!.variables).toEqual({ limit: 5, offset: 10 });
+    expect(mock.requests[0]!.document).toContain("offset: $offset");
+    expect(mock.requests[0]!.document).toContain("limit: $limit");
+});
+
 test("aggregate({}) rejects with a stable error instead of sending a malformed document", async () => {
     const mock = createMockExecutor({
         User_aggregate: { aggregate: { count: 7 } },

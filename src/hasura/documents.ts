@@ -227,6 +227,8 @@ type AggregateRequestArgs = {
     nodes?: readonly string[];
     where?: unknown;
     order?: unknown;
+    offset?: number;
+    limit?: number;
     distinctOn?: string;
     kind?: "query" | "subscription";
 };
@@ -255,6 +257,16 @@ export function buildAggregateRequest(
         defs.push({ name: "order", type: `[${args.table}_order_by!]` });
         fieldArgs.push({ name: "order_by", variable: "order" });
         variables.order = args.order;
+    }
+    if (args.offset !== undefined) {
+        defs.push({ name: "offset", type: "Int" });
+        fieldArgs.push({ name: "offset", variable: "offset" });
+        variables.offset = args.offset;
+    }
+    if (args.limit !== undefined) {
+        defs.push({ name: "limit", type: "Int" });
+        fieldArgs.push({ name: "limit", variable: "limit" });
+        variables.limit = args.limit;
     }
     const name = `Aggregate${args.table}`;
     return {

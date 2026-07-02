@@ -391,6 +391,8 @@ export class HasuraTableBuilder<
                     nodes: state.agg?.nodes,
                     where: state.where,
                     order: state.order,
+                    offset: state.offset,
+                    limit: state.limit,
                     distinctOn: state.distinctOn,
                     kind: listKind,
                 });
