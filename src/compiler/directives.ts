@@ -44,6 +44,16 @@ type DirectiveKnown<
 > = Name extends "skip" | "include" ? true
     : [DirectiveMeta<S, Namespace, Name>] extends [never] ? false : true;
 
+// Built-in @skip/@include are non-repeatable; a schema directive repeats only
+// when its meta explicitly opts in with `repeatable: true` (spec §5.7.3).
+type DirectiveRepeatable<
+    Name extends string,
+    S extends GraphQLSchema,
+    Namespace extends string,
+> = Name extends "skip" | "include" ? false
+    : DirectiveMeta<S, Namespace, Name> extends { repeatable: true } ? true
+    : false;
+
 type DirectiveArgs<
     Name extends string,
     S extends GraphQLSchema,
@@ -80,6 +90,7 @@ export type TakeDirectives<
     Namespace extends string,
     Optional extends boolean = false,
     Uses = never,
+    Seen = never,
 > = SkipIgnored<Source> extends `@${infer Rest}`
     ? TakeName<Rest> extends Match<
         infer Name extends string,
@@ -87,7 +98,14 @@ export type TakeDirectives<
     >
         ? DirectiveKnown<Name, S, Namespace> extends true
             ? DirectiveLocationAllowed<Name, S, Namespace, Location> extends true
-                ? SkipIgnored<AfterName> extends `(${string}`
+                ? (DirectiveRepeatable<Name, S, Namespace> extends false
+                    ? Name extends Seen ? true : false
+                    : false) extends true
+                    ? GraphQLError<
+                        "DUPLICATE_DIRECTIVE",
+                        `directive @${Name} is not repeatable and cannot be used more than once at this location`
+                    >
+                : SkipIgnored<AfterName> extends `(${string}`
                     ? TakeParenthesized<AfterName> extends Match<
                         infer Args extends string,
                         infer AfterArgs extends string
@@ -107,7 +125,8 @@ export type TakeDirectives<
                                 Location,
                                 Namespace,
                                 Optional extends true ? true : DirectiveOptional<Name, Args>,
-                                Uses | ArgumentUses<ValidatedArgs>
+                                Uses | ArgumentUses<ValidatedArgs>,
+                                Seen | Name
                             >
                             : never
                         : TakeParenthesized<AfterName>
@@ -124,7 +143,8 @@ export type TakeDirectives<
                             Location,
                             Namespace,
                             Optional,
-                            Uses | ArgumentUses<ValidatedArgs>
+                            Uses | ArgumentUses<ValidatedArgs>,
+                            Seen | Name
                         >
                         : never
                 : GraphQLError<

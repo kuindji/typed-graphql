@@ -87,6 +87,13 @@ type Schema = {
                 };
                 locations: "FIELD";
             };
+            tag: {
+                arguments: {
+                    name: GraphQLInput<"String">;
+                };
+                locations: "FIELD";
+                repeatable: true;
+            };
         };
     };
 };
@@ -251,6 +258,34 @@ test("directive argument lists cannot be empty", () => {
         .toEqualTypeOf<true>();
     expectTypeOf<IsValidGraphQL<"{ version @trace }", Schema>>()
         .toEqualTypeOf<true>();
+});
+
+test("non-repeatable directives cannot be duplicated at one location", () => {
+    // Built-in @include is non-repeatable (spec §5.7.3).
+    expectTypeOf<
+        ValidateGraphQL<
+            "query Q($s: Boolean!) { version @include(if: $s) @include(if: $s) }",
+            Schema
+        >
+    >().toMatchTypeOf<{ code: "DUPLICATE_DIRECTIVE"; }>();
+
+    // A schema directive without `repeatable` is likewise unique per location.
+    expectTypeOf<
+        ValidateGraphQL<'{ version @trace(tag: "a") @trace(tag: "b") }', Schema>
+    >().toMatchTypeOf<{ code: "DUPLICATE_DIRECTIVE"; }>();
+
+    // Distinct directives at one location are allowed.
+    expectTypeOf<
+        IsValidGraphQL<
+            'query Q($s: Boolean!) { version @include(if: $s) @trace(tag: "a") }',
+            Schema
+        >
+    >().toEqualTypeOf<true>();
+
+    // A directive declared repeatable may appear more than once.
+    expectTypeOf<
+        IsValidGraphQL<'{ version @tag(name: "a") @tag(name: "b") }', Schema>
+    >().toEqualTypeOf<true>();
 });
 
 test("a subscription must select exactly one root field", () => {
