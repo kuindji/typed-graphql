@@ -5,7 +5,7 @@
 // `const C` preserves defaultSelections literals for lazy per-table
 // GetSelectionType evaluation.
 
-import type { GetSelectionType } from "../index.js";
+import type { GetSelectionType, ValidateSelection } from "../index.js";
 import type { GraphQLExecutor } from "../runtime/request.js";
 import type { GraphQLSchema } from "../schema.js";
 import { HasuraTableBuilder, type NoSelection } from "./builder.js";
@@ -29,12 +29,15 @@ type DefaultSelectionOf<C, T> = C extends
     ? T extends keyof DS ? DS[T] : undefined
     : undefined;
 
+// Invalid default selections surface as a branded GraphQLError row type
+// (same convention as NoSelection) instead of collapsing to never.
 type SelectionResultOf<
     S extends GraphQLSchema,
     C,
     T extends HasuraTableName<S>,
 > = DefaultSelectionOf<C, T> extends infer G extends string
-    ? GetSelectionType<G, S, T>
+    ? ValidateSelection<G, S, T> extends true ? GetSelectionType<G, S, T>
+    : ValidateSelection<G, S, T>
     : NoSelection;
 
 type InsertTypeOf<

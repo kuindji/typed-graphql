@@ -50,6 +50,14 @@ export type StringColumn<
         : never;
 }[TableColumn<S, T>];
 
+export type NumericColumn<
+    S extends GraphQLSchema,
+    T extends HasuraTableName<S>,
+> = {
+    [K in TableColumn<S, T>]: NonNullable<TableRow<S, T>[K]> extends number ? K
+        : never;
+}[TableColumn<S, T>];
+
 type SchemaRelations<S extends GraphQLSchema> = S extends
     { relations: infer R; }
     ? S["defaultSchema"] extends keyof R ? R[S["defaultSchema"]] : {}
@@ -124,17 +132,47 @@ export type OrderDirection =
     | "desc_nulls_first"
     | "desc_nulls_last";
 
-type OrderRelations<
+// Hasura order_by semantics: object relationships order by the related
+// table's columns; array relationships can only order by aggregates,
+// exposed under the `<relation>_aggregate` key.
+type AggregateOrderBy<
     S extends GraphQLSchema,
     T extends HasuraTableName<S>,
 > = {
-    [R in string & keyof TableRelations<S, T>]?: TableRelations<S, T>[R] extends
-        { type: infer RT; }
-        ? RT extends HasuraTableName<S>
-            ? { [K in TableColumn<S, RT>]?: OrderDirection; }
-        : never
-        : never;
+    count?: OrderDirection;
+    max?: { [K in TableColumn<S, T>]?: OrderDirection; };
+    min?: { [K in TableColumn<S, T>]?: OrderDirection; };
+    avg?: { [K in NumericColumn<S, T>]?: OrderDirection; };
+    sum?: { [K in NumericColumn<S, T>]?: OrderDirection; };
 };
+
+type OrderRelations<
+    S extends GraphQLSchema,
+    T extends HasuraTableName<S>,
+> =
+    & {
+        [
+            R in string & keyof TableRelations<S, T> as TableRelations<
+                S,
+                T
+            >[R] extends { multiple: true; } ? never : R
+        ]?: TableRelations<S, T>[R] extends { type: infer RT; }
+            ? RT extends HasuraTableName<S>
+                ? { [K in TableColumn<S, RT>]?: OrderDirection; }
+            : never
+            : never;
+    }
+    & {
+        [
+            R in string & keyof TableRelations<S, T> as TableRelations<
+                S,
+                T
+            >[R] extends { multiple: true; } ? `${R}_aggregate` : never
+        ]?: TableRelations<S, T>[R] extends { type: infer RT; }
+            ? RT extends HasuraTableName<S> ? AggregateOrderBy<S, RT>
+            : never
+            : never;
+    };
 
 export type OrderBy<
     S extends GraphQLSchema,
@@ -153,8 +191,8 @@ export type TableAggregateInput<
     };
     max?: NonEmptyArray<TableColumn<S, T>>;
     min?: NonEmptyArray<TableColumn<S, T>>;
-    avg?: NonEmptyArray<TableColumn<S, T>>;
-    sum?: NonEmptyArray<TableColumn<S, T>>;
+    avg?: NonEmptyArray<NumericColumn<S, T>>;
+    sum?: NonEmptyArray<NumericColumn<S, T>>;
 };
 
 type AggregateColumns<

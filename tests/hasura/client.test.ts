@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { expectTypeOf } from "expect-type";
 
+import type { IsGraphQLError } from "../../src/diagnostics.js";
 import type { NoSelection } from "../../src/hasura/builder.js";
 import { createHasuraClient } from "../../src/hasura/client.js";
 import {
@@ -50,6 +51,17 @@ test("without a default selection the result type is NoSelection", async () => {
         .toThrow('No selection for table "Post"');
     const selected = await client.table("Post").select("id title");
     expectTypeOf(selected).toEqualTypeOf<{ id: string; title: string; }[]>();
+});
+
+test("invalid default selections surface a GraphQLError row type", () => {
+    const mock = createMockExecutor(null);
+    const client = createHasuraClient<TestSchema>()({
+        executor: mock.executor,
+        defaultSelections: { User: "nope" },
+    });
+    const builder = client.table("User");
+    type Row = typeof builder extends PromiseLike<(infer R)[]> ? R : never;
+    expectTypeOf<IsGraphQLError<Row>>().toEqualTypeOf<true>();
 });
 
 test("insert data defaults to Partial<Row> and honors InsertTypes", () => {

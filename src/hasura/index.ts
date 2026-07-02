@@ -20,6 +20,7 @@ export type {
     HasuraTables,
     Materialize,
     NonEmptyArray,
+    NumericColumn,
     OrderBy,
     OrderDirection,
     StringColumn,

@@ -4,6 +4,7 @@ import { expectTypeOf } from "expect-type";
 import type {
     HasuraTableName,
     OrderBy,
+    TableAggregateInput,
     TableAggregateOutput,
     TableRow,
     WhereInput,
@@ -41,13 +42,40 @@ test("WhereInput narrows operator values by column type", () => {
     void badColumn;
 });
 
-test("OrderBy covers columns and one relation level", () => {
-    type O = OrderBy<TestSchema, "User">;
-    const ok: O = { age: "desc", posts: { title: "asc_nulls_last" } };
+test("OrderBy covers columns and object-relation columns", () => {
+    type O = OrderBy<TestSchema, "Post">;
+    const ok: O = { title: "desc", user: { age: "asc_nulls_last" } };
     void ok;
     // @ts-expect-error direction strings are constrained
-    const bad: O = { age: "downwards" };
+    const bad: O = { title: "downwards" };
     void bad;
+});
+
+test("OrderBy orders array relations by aggregates only", () => {
+    type O = OrderBy<TestSchema, "User">;
+    const ok: O = {
+        age: "desc",
+        posts_aggregate: { count: "desc", avg: { rating: "asc" } },
+    };
+    void ok;
+    // @ts-expect-error array relations cannot order by columns
+    const badColumns: O = { posts: { title: "asc_nulls_last" } };
+    void badColumns;
+    // @ts-expect-error avg aggregate ordering is numeric-only
+    const badAvg: O = { posts_aggregate: { avg: { title: "asc" } } };
+    void badAvg;
+});
+
+test("aggregate avg/sum inputs are numeric-only", () => {
+    type A = TableAggregateInput<TestSchema, "User">;
+    const ok: A = { avg: [ "age" ], sum: [ "age" ], max: [ "email" ] };
+    void ok;
+    // @ts-expect-error avg requires numeric columns
+    const badAvg: A = { avg: [ "email" ] };
+    void badAvg;
+    // @ts-expect-error sum requires numeric columns
+    const badSum: A = { sum: [ "active" ] };
+    void badSum;
 });
 
 test("TableAggregateOutput derives from the aggregate input", () => {
