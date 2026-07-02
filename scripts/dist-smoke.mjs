@@ -25,7 +25,9 @@ try {
     api = await import(resolve(root, "dist/index.js"));
 }
 catch (err) {
-    console.error("FAIL: could not import dist/index.js — did you run `npm run build`?");
+    console.error(
+        "FAIL: could not import dist/index.js — did you run `npm run build`?",
+    );
     console.error(err);
     process.exit(1);
 }
@@ -44,10 +46,50 @@ else if (readFileSync(dts, "utf8").trim().length === 0) {
     fail("dist/index.d.ts is empty");
 }
 
+// 3. Subpath entries (runtime + hasura) resolve and expose their runtime
+//    surface, and their .d.ts entries exist.
+for (
+    const [ subpath, expected ] of [
+        [ "runtime", [
+            "extractResult",
+            "buildOperationDocument",
+            "buildFieldArguments",
+        ] ],
+        [ "hasura", [
+            "createHasuraClient",
+            "HasuraTableBuilder",
+            "generateAggregateSelection",
+            "buildListRequest",
+            "buildInsertRequest",
+            "buildUpdateRequest",
+            "buildDeleteRequest",
+            "buildAggregateRequest",
+        ] ],
+    ]
+) {
+    let sub;
+    try {
+        sub = await import(resolve(root, `dist/${subpath}/index.js`));
+    }
+    catch {
+        fail(`could not import dist/${subpath}/index.js`);
+        continue;
+    }
+    for (const name of expected) {
+        if (typeof sub[name] !== "function") {
+            fail(`dist/${subpath} missing function export: ${name}`);
+        }
+    }
+    const subDts = resolve(root, `dist/${subpath}/index.d.ts`);
+    if (!existsSync(subDts)) {
+        fail(`dist/${subpath}/index.d.ts is missing`);
+    }
+}
+
 if (failures.length > 0) {
     console.error(`dist smoke test FAILED (${failures.length}):`);
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
 }
 
-console.log("dist smoke test passed: runtime export + .d.ts OK");
+console.log("dist smoke test passed: root + runtime + hasura entries OK");

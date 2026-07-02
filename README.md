@@ -80,6 +80,31 @@ type Partial = GetSelectionType<"id email", Schema, "User">;
 type PartialValid = ValidateSelection<"id email", Schema, "User">;
 ```
 
+## Runtime construction
+
+The core stays type-only. Runtime query building ships as separate entries:
+
+- `@kuindji/typed-graphql/runtime` — the transport-neutral boundary:
+  `GraphQLRequest`, `GraphQLExecutor`, `extractResult`, and document
+  assembly helpers. You inject an executor that owns transport,
+  authentication, retry, and error reporting.
+- `@kuindji/typed-graphql/hasura` — an immutable, chainable Hasura builder
+  typed by the same schema:
+
+```ts
+import { createHasuraClient } from "@kuindji/typed-graphql/hasura";
+
+const client = createHasuraClient<Schema>()({
+    executor: { execute: async (request) => runRequestSomehow(request) },
+    primaryKeys: { User: "id" },
+    defaultSelections: { User: "id email" },
+});
+
+const users = await client.table("User").eq("email", "a@b.c").limit(10);
+const one = await client.table("User").id(userId).one();
+const count = await client.table("User").count();
+```
+
 ## Development
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
