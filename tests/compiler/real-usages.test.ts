@@ -13,7 +13,6 @@ import type {
 } from "../fixtures/thefloorr-schema.js";
 
 type Schema = TheFloorrSchema;
-type Public = Schema["schemas"]["public"];
 
 // Ported from apps/tools/src/pages/LookEditor.tsx (`.select("id title")`).
 test("flat scalar selection", () => {
