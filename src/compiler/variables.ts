@@ -260,12 +260,26 @@ type RequiredVariableNames<Uses, Definitions> = {
 type OptionalVariableNames<Uses, Definitions> =
     Exclude<UsedNames<Uses>, RequiredVariableNames<Uses, Definitions>>;
 
+// A nullable wire type accepts an explicit null value, so the runtime
+// variables object widens to `| null` for it. A variable that is optional
+// only because it carries a default on a non-null type must not.
+type NullIfNullable<Definitions, Name extends string> =
+    Extract<Definitions, { name: Name }> extends VariableDefinition<
+        Name,
+        infer Wire,
+        VariableDefaultState
+    >
+        ? Wire extends `${string}!` ? never : null
+        : never;
+
 type Simplify<T> = { [K in keyof T]: T[K] };
 
 type MaterializeVariables<Uses, Definitions> = Simplify<{
     [Name in RequiredVariableNames<Uses, Definitions>]: VariableValue<Uses, Name>;
 } & {
-    [Name in OptionalVariableNames<Uses, Definitions>]?: VariableValue<Uses, Name>;
+    [Name in OptionalVariableNames<Uses, Definitions>]?:
+        | VariableValue<Uses, Name>
+        | NullIfNullable<Definitions, Name>;
 }>;
 
 export type ResolveVariables<

@@ -220,6 +220,14 @@ test("variables inside list literals keep the argument's branded type", () => {
         .toEqualTypeOf<{ one: UserId }>();
 });
 
+test("a nullable variable accepts an explicit null value", () => {
+    type Query = "query Q($note: String) { echo(text: $note) }";
+
+    expectTypeOf<IsValidGraphQL<Query, Schema>>().toEqualTypeOf<true>();
+    expectTypeOf<GetVariables<Query, Schema>>()
+        .toEqualTypeOf<{ note?: string | null; }>();
+});
+
 test("comments end at a lone carriage return, not only at newline", () => {
     expectTypeOf<IsValidGraphQL<"# lead\r{ version }", Schema>>()
         .toEqualTypeOf<true>();

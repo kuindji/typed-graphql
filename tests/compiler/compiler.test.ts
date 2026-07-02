@@ -330,6 +330,13 @@ test("variable defaults are validated against declared input types", () => {
     expectTypeOf<IsValidGraphQL<NullableWithDefault, AdvancedSchema>>()
         .toEqualTypeOf<true>();
     expectTypeOf<GetVariables<NullableWithDefault, AdvancedSchema>>()
+        .toEqualTypeOf<{ flag?: boolean | null; }>();
+
+    // Optional only because of the default — the non-null wire type still
+    // rejects an explicit null.
+    type NonNullWithDefault =
+        'query Q($flag: Boolean! = true) { search(filter: { ids: ["1"] }) @client(flag: $flag) }';
+    expectTypeOf<GetVariables<NonNullWithDefault, AdvancedSchema>>()
         .toEqualTypeOf<{ flag?: boolean; }>();
 
     type InputObjectDefault =
