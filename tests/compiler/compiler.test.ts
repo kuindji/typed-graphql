@@ -311,6 +311,18 @@ test("directive variables are collected and unused variables are rejected", () =
     >().toMatchTypeOf<{ code: "UNUSED_VARIABLE"; }>();
 });
 
+test("a field selected unconditionally and under @include stays required", () => {
+    type Query =
+        "query Q($show: Boolean!) { version version @include(if: $show) }";
+    expectTypeOf<GetReturnType<Query, Schema>>()
+        .toEqualTypeOf<{ version: string; }>();
+
+    type OnlyConditional =
+        "query Q($show: Boolean!) { version @include(if: $show) }";
+    expectTypeOf<GetReturnType<OnlyConditional, Schema>>()
+        .toEqualTypeOf<{ version?: string; }>();
+});
+
 test("variable defaults are validated against declared input types", () => {
     type NullableWithDefault =
         'query Q($flag: Boolean = true) { search(filter: { ids: ["1"] }) @client(flag: $flag) }';

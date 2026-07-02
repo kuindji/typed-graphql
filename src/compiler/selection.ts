@@ -839,9 +839,13 @@ type OptionalFlag<Fields, Key extends string> =
         : never
         : never;
 
+// A response key is guaranteed present when ANY of its occurrences is
+// unconditional (optional: false) — an @include/@skip or narrower type
+// condition on one duplicate cannot remove a field another selection
+// always produces.
 type RequiredKeys<Fields> = {
     [K in FieldKeys<Fields>]:
-        true extends OptionalFlag<Fields, K> ? never : K;
+        false extends OptionalFlag<Fields, K> ? K : never;
 }[FieldKeys<Fields>];
 
 type OptionalKeys<Fields> = Exclude<FieldKeys<Fields>, RequiredKeys<Fields>>;
