@@ -12,11 +12,13 @@ import type {
 import type { DirectivesResult, TakeDirectives } from "./directives.js";
 import type { FragmentEntry } from "./document.js";
 import type {
+    IsUnionSource,
     Match,
     SkipIgnored,
     TakeBraced,
     TakeName,
     TakeParenthesized,
+    UnionSourceError,
 } from "./scanner.js";
 
 interface TypeContext<
@@ -867,7 +869,8 @@ export type CompileSelection<
     S extends GraphQLSchema,
     Root extends string,
     Fragments = never,
-> = ResolveType<Root, S["defaultSchema"]> extends infer Context extends TypeContext
+> = IsUnionSource<Source> extends true ? UnionSourceError
+    : ResolveType<Root, S["defaultSchema"]> extends infer Context extends TypeContext
     ? HasType<S, Context> extends true
         ? RunSelection<Source, S, Context, Fragments> extends infer Result
             ? Result extends SelectionSuccess<infer Fields, infer Uses>

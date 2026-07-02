@@ -5,6 +5,21 @@ export interface Match<Out, Rest extends string> {
     rest: Rest;
 }
 
+// A naked union source distributes through every conditional in the
+// compiler, compiling each member independently: a template literal with 4
+// interpolations of a 6-member union expands to 6^4 = 1,296 documents
+// (~7.8M instantiations) from ~120 chars of source. Entry points check this
+// and reject union sources outright before any distribution starts. `never`
+// stays false so it keeps flowing through the compiler unchanged.
+export type IsUnionSource<T, U = T> = [T] extends [never] ? false
+    : T extends unknown ? ([U] extends [T] ? false : true)
+    : never;
+
+export type UnionSourceError = GraphQLError<
+    "UNSUPPORTED_SOURCE",
+    "source must be a single string type, not a union of strings"
+>;
+
 type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 type Letter =
     | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M"

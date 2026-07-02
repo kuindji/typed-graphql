@@ -5,7 +5,14 @@ import type {
     OperationEntry,
     SelectOperation,
 } from "./document.js";
-import type { Match, SkipIgnored, TakeName, TakeParenthesized } from "./scanner.js";
+import type {
+    IsUnionSource,
+    Match,
+    SkipIgnored,
+    TakeName,
+    TakeParenthesized,
+    UnionSourceError,
+} from "./scanner.js";
 import type { CompileSelection, SelectionSuccess } from "./selection.js";
 import type { ResolveVariables } from "./variables.js";
 
@@ -132,7 +139,8 @@ export type CompileGraphQL<
     Query extends string,
     S extends GraphQLSchema,
     OperationName extends string | undefined = undefined,
-> = IndexGraphQL<Query, S> extends infer Index
+> = IsUnionSource<Query> extends true ? UnionSourceError
+    : IndexGraphQL<Query, S> extends infer Index
     ? Index extends GraphQLError ? Index
     : Index extends {
         operations: infer Operations;
