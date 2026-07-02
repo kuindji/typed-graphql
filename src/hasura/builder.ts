@@ -389,7 +389,11 @@ export class HasuraTableBuilder<
     private unwrap(payload: unknown): unknown {
         switch (this.state.mode) {
             case "single":
-                return Array.isArray(payload) ? payload[0] ?? null : null;
+                // Executors resolving through an object-valued field (e.g. a
+                // *_by_pk-style resultPath) hand over a bare row, not a list.
+                return Array.isArray(payload)
+                    ? payload[0] ?? null
+                    : payload ?? null;
             case "list":
             case "insert":
                 return payload ?? [];

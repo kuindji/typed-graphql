@@ -123,6 +123,13 @@ test("one() forces limit 1 and resolves the first row or null", async () => {
     expect(missing).toBeNull();
 });
 
+test("one() returns a bare object payload instead of dropping it", async () => {
+    const row = { id: "u1" as UserId, email: null };
+    const mock = createMockExecutor({ User: row });
+    const single = await userBuilder(mock.executor).one();
+    expect(single).toEqual(row);
+});
+
 test("id() uses the configured primary key and throws without one", async () => {
     const mock = createMockExecutor({ User: [] });
     await userBuilder(mock.executor).id("u1" as UserId).one();
