@@ -186,6 +186,22 @@ test("an empty where filter does not bypass the update/remove guard", async () =
     expect(mock.requests).toEqual([]);
 });
 
+test("null mutation and aggregate payloads reject instead of resolving null", async () => {
+    const mock = createMockExecutor(null);
+    await expect(
+        Promise.resolve(
+            userBuilder(mock.executor).eq("active", false).update({
+                email: null,
+            }),
+        ),
+    ).rejects.toThrow('update on table "User" returned no payload');
+    await expect(
+        Promise.resolve(userBuilder(mock.executor).eq("active", false).remove()),
+    ).rejects.toThrow('remove on table "User" returned no payload');
+    await expect(Promise.resolve(userBuilder(mock.executor).count()))
+        .rejects.toThrow('aggregate on table "User" returned no payload');
+});
+
 test("count() resolves the aggregate count object", async () => {
     const mock = createMockExecutor({
         User_aggregate: { aggregate: { count: 7 } },

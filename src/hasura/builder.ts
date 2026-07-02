@@ -394,7 +394,16 @@ export class HasuraTableBuilder<
             case "insert":
                 return payload ?? [];
             default:
-                return payload ?? null;
+                // aggregate/update/remove results are typed non-null;
+                // returning null here would surface as a TypeError at the
+                // caller's .affected_rows/.aggregate access, so fail loudly.
+                if (payload === null || payload === undefined) {
+                    throw new Error(
+                        `${this.state.mode} on table "${this.state.table}" `
+                            + "returned no payload",
+                    );
+                }
+                return payload;
         }
     }
 
