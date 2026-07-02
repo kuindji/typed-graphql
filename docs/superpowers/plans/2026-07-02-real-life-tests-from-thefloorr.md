@@ -371,7 +371,7 @@ test("nullable object relation", () => {
         id: string;
         title: string | null;
         customer: {
-            id: UserId;
+            id: string;
             email: string | null;
         } | null;
     }>();
@@ -445,7 +445,7 @@ test("deep chat-connection graph with field arguments", () => {
         lastOnlineAt: string | null;
         role: string | null;
         user: {
-            id: UserId;
+            id: string;
             avatar: string | null;
             givenName: string | null;
             familyName: string | null;
@@ -550,13 +550,13 @@ test("selection composed from interpolated fragments", () => {
         id: string;
         title: string | null;
         customer: {
-            id: UserId;
+            id: string;
             givenName: string | null;
             familyName: string | null;
             email: string | null;
         } | null;
         fri: {
-            id: UserId;
+            id: string;
             givenName: string | null;
             familyName: string | null;
             email: string | null;
@@ -636,7 +636,6 @@ import { expectTypeOf } from "expect-type";
 import { createHasuraClient } from "../../src/hasura/client.js";
 import { createMockExecutor } from "./fixtures.js";
 import type {
-    ChatId,
     TheFloorrSchema,
     UserId,
 } from "../fixtures/thefloorr-schema.js";
@@ -723,16 +722,16 @@ test("_and conjunction with order, limit, offset", async () => {
 // `.one()`, and result typing.
 test("shorthand filters, id, and one() result typing", async () => {
     const { client, mock } = makeClient({
-        User: [ { id: "u1" as UserId, email: null } ],
+        User: [ { id: "u1", email: null } ],
     });
     const row = await client.table("User")
         .select("id email")
         .eq("email", "a@b.c")
-        .id("u1" as UserId)
+        .id("u1")
         .one();
-    expect(row).toEqual({ id: "u1" as UserId, email: null });
+    expect(row).toEqual({ id: "u1", email: null });
     expectTypeOf(row).toEqualTypeOf<
-        { id: UserId; email: string | null; } | null
+        { id: string; email: string | null; } | null
     >();
     expect(mock.requests[0]!.variables).toEqual({
         where: { email: { _eq: "a@b.c" }, id: { _eq: "u1" } },
