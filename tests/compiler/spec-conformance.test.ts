@@ -288,6 +288,26 @@ test("non-repeatable directives cannot be duplicated at one location", () => {
     >().toEqualTypeOf<true>();
 });
 
+test("Int literals outside the 32-bit signed range are rejected", () => {
+    // In-range boundaries are accepted.
+    expectTypeOf<IsValidGraphQL<"{ echo(count: 2147483647) }", Schema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<IsValidGraphQL<"{ echo(count: -2147483648) }", Schema>>()
+        .toEqualTypeOf<true>();
+    expectTypeOf<IsValidGraphQL<"{ echo(count: 0) }", Schema>>()
+        .toEqualTypeOf<true>();
+
+    // One past each boundary is out of range (spec §3.5.1).
+    expectTypeOf<ValidateGraphQL<"{ echo(count: 2147483648) }", Schema>>()
+        .toMatchTypeOf<{ code: "INT_OUT_OF_RANGE"; }>();
+    expectTypeOf<ValidateGraphQL<"{ echo(count: -2147483649) }", Schema>>()
+        .toMatchTypeOf<{ code: "INT_OUT_OF_RANGE"; }>();
+
+    // Far out of range (more than ten digits) also rejected.
+    expectTypeOf<ValidateGraphQL<"{ echo(count: 99999999999) }", Schema>>()
+        .toMatchTypeOf<{ code: "INT_OUT_OF_RANGE"; }>();
+});
+
 test("a subscription must select exactly one root field", () => {
     type SubSchema = {
         defaultSchema: "public";

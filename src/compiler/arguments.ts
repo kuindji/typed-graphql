@@ -95,11 +95,20 @@ type ScanNumber<S extends string> =
             ? GuardNumberEnd<ScanFractionExponent<Rest>>
             : never;
 
+// The source of the scanned number is the prefix of `S` preceding the
+// unconsumed `Rest`. `Rest` always begins with a non-numeric delimiter
+// (GuardNumberEnd forbids a trailing digit/`.`/name char), so it never occurs
+// inside the numeric prefix and the first-occurrence split is unambiguous.
+type ConsumedNumber<S extends string, Rest extends string> =
+    Rest extends "" ? S
+        : S extends `${infer Num}${Rest}` ? Num
+        : S;
+
 type TakeNumber<S extends string> =
     [ScanNumber<S>] extends [never]
         ? GraphQLError<"SYNTAX_ERROR", "invalid numeric literal">
         : ScanNumber<S> extends NumberScan<infer Kind, infer Rest>
-        ? Match<LiteralValue<Kind>, Rest>
+        ? Match<LiteralValue<Kind, ConsumedNumber<S, Rest>>, Rest>
         : GraphQLError<"SYNTAX_ERROR", "invalid numeric literal">;
 
 export type TakeValue<S extends string> =
@@ -235,6 +244,68 @@ type ScalarLiteralCompatible<Value, Wire extends string> =
         ? Value extends LiteralValue<"string" | "int"> ? true : false
     : false;
 
+// Digits strictly less than the given decimal digit — the per-position
+// comparator for equal-length magnitude strings.
+type DigitsLessThan<D extends string> =
+    D extends "0" ? never
+    : D extends "1" ? "0"
+    : D extends "2" ? "0" | "1"
+    : D extends "3" ? "0" | "1" | "2"
+    : D extends "4" ? "0" | "1" | "2" | "3"
+    : D extends "5" ? "0" | "1" | "2" | "3" | "4"
+    : D extends "6" ? "0" | "1" | "2" | "3" | "4" | "5"
+    : D extends "7" ? "0" | "1" | "2" | "3" | "4" | "5" | "6"
+    : D extends "8" ? "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7"
+    : D extends "9" ? "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8"
+    : never;
+
+// Lexicographic compare of two equal-length digit strings.
+type LexCompareDigits<A extends string, B extends string> =
+    A extends `${infer AH}${infer AR}`
+        ? B extends `${infer BH}${infer BR}`
+            ? AH extends BH ? LexCompareDigits<AR, BR>
+            : BH extends DigitsLessThan<AH> ? "gt"
+            : "lt"
+        : "gt"
+    : "eq";
+
+// Length of a magnitude relative to ten digits, counted by single-character
+// peels so the ten-position digit union never materializes. `${infer}` chains
+// bind one character each, sidestepping the `Digit`-union cross-product.
+type MagnitudeLength<Mag extends string> =
+    Mag extends
+        `${infer _0}${infer _1}${infer _2}${infer _3}${infer _4}${infer _5}${infer _6}${infer _7}${infer _8}${infer _9}${infer Rest}`
+        ? Rest extends "" ? "eq10" : "gt10"
+        : "lt10";
+
+// True when `Mag` (a leading-zero-free decimal magnitude) is <= `Bound`, a
+// fixed ten-digit bound. Fewer digits ⇒ smaller; more ⇒ larger; equal length
+// ⇒ lexicographic.
+type MagnitudeLte<Mag extends string, Bound extends string> =
+    MagnitudeLength<Mag> extends "gt10" ? false
+    : MagnitudeLength<Mag> extends "lt10" ? true
+    : LexCompareDigits<Mag, Bound> extends "gt" ? false : true;
+
+// Spec §3.5.1: Int is a signed 32-bit value, i.e. [-2147483648, 2147483647].
+type IntInRange<Source extends string> =
+    Source extends `-${infer Mag extends string}`
+        ? MagnitudeLte<Mag, "2147483648">
+        : MagnitudeLte<Source, "2147483647">;
+
+// Non-`never` only when `Wire` is Int and `Value` is an out-of-range int
+// literal; wrapped around ValidateValue's body so every other case is untouched.
+type IntRangeError<Wire extends string, Value> =
+    StripNonNull<Wire> extends "Int"
+        ? Value extends LiteralValue<"int", infer Source extends string>
+            ? IntInRange<Source> extends false
+                ? GraphQLError<
+                    "INT_OUT_OF_RANGE",
+                    `Int value ${Source} is outside the 32-bit signed range`
+                >
+                : never
+            : never
+        : never;
+
 type IsNarrowApplicationType<Wire extends string, App> =
     DefaultInputType<Wire> extends App ? false : true;
 
@@ -336,6 +407,7 @@ type ValidateValue<
         "input value nesting exceeds compiler depth budget"
     >
     : Input extends GraphQLInput<infer Wire, infer App>
+        ? [IntRangeError<Wire, Value>] extends [never]
         ? Value extends VariableValue<infer Name>
             ? ArgumentsSuccess<VariableUse<Name, Input>>
         : Value extends LiteralValue<"null">
@@ -407,6 +479,7 @@ type ValidateValue<
                         `literal is incompatible with ${Wire}`
                     >
             : never
+        : IntRangeError<Wire, Value>
         : GraphQLError<"INVALID_SCHEMA", "argument metadata must use GraphQLInput">;
 
 export type ValidateDefaultValue<
