@@ -210,6 +210,11 @@ export function generateAggregateSelection(
     if (nodes !== undefined && nodes.length > 0) {
         outputParts.push(`nodes { ${nodes.join(" ")} }`);
     }
+    if (outputParts.length === 0) {
+        throw new Error(
+            "aggregate requires at least one aggregate function or nodes selection",
+        );
+    }
     return outputParts.join(" ");
 }
 

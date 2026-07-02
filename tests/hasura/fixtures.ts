@@ -65,6 +65,11 @@ export function createMockExecutor(result: unknown = null) {
                 observer.next(data);
             }
         },
+        emitError: (err: unknown) => {
+            for (const observer of observers) {
+                observer.error?.(err);
+            }
+        },
         wasUnsubscribed: () => unsubscribed,
     };
 }

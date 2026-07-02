@@ -96,6 +96,25 @@ export class HasuraTableBuilder<
         return { ...this.state.where, ...condition };
     }
 
+    /** Merges operators into an existing column entry instead of replacing
+     * the whole column, so chaining filters on the same column (e.g.
+     * `.gt("age", 18).lt("age", 65)`) accumulates operators rather than
+     * silently dropping earlier ones. */
+    private mergeFieldOperator(
+        field: string,
+        operators: Record<string, unknown>,
+    ) {
+        const existing = this.state.where?.[field];
+        return this.mergeWhere({
+            [field]: {
+                ...(existing !== null && typeof existing === "object"
+                    ? existing
+                    : undefined),
+                ...operators,
+            },
+        });
+    }
+
     where(where: WhereInput<S, T>) {
         return this.next({
             where: this.mergeWhere(where as Record<string, unknown>),
@@ -107,7 +126,7 @@ export class HasuraTableBuilder<
         value: NonNullable<TableRow<S, T>[F]>,
     ) {
         return this.next({
-            where: this.mergeWhere({ [field]: { _eq: value } }),
+            where: this.mergeFieldOperator(field, { _eq: value }),
         });
     }
 
@@ -116,7 +135,7 @@ export class HasuraTableBuilder<
         value: NonNullable<TableRow<S, T>[F]>,
     ) {
         return this.next({
-            where: this.mergeWhere({ [field]: { _neq: value } }),
+            where: this.mergeFieldOperator(field, { _neq: value }),
         });
     }
 
@@ -125,7 +144,7 @@ export class HasuraTableBuilder<
         value: NonNullable<TableRow<S, T>[F]>[],
     ) {
         return this.next({
-            where: this.mergeWhere({ [field]: { _in: value } }),
+            where: this.mergeFieldOperator(field, { _in: value }),
         });
     }
 
@@ -134,7 +153,7 @@ export class HasuraTableBuilder<
         value: NonNullable<TableRow<S, T>[F]>[],
     ) {
         return this.next({
-            where: this.mergeWhere({ [field]: { _nin: value } }),
+            where: this.mergeFieldOperator(field, { _nin: value }),
         });
     }
 
@@ -145,7 +164,7 @@ export class HasuraTableBuilder<
     ) {
         const op = including ? "_gte" : "_gt";
         return this.next({
-            where: this.mergeWhere({ [field]: { [op]: value } }),
+            where: this.mergeFieldOperator(field, { [op]: value }),
         });
     }
 
@@ -156,7 +175,7 @@ export class HasuraTableBuilder<
     ) {
         const op = including ? "_lte" : "_lt";
         return this.next({
-            where: this.mergeWhere({ [field]: { [op]: value } }),
+            where: this.mergeFieldOperator(field, { [op]: value }),
         });
     }
 
@@ -167,7 +186,7 @@ export class HasuraTableBuilder<
     ) {
         const op = caseSensitive ? "_like" : "_ilike";
         return this.next({
-            where: this.mergeWhere({ [field]: { [op]: value } }),
+            where: this.mergeFieldOperator(field, { [op]: value }),
         });
     }
 
@@ -178,19 +197,13 @@ export class HasuraTableBuilder<
     ) {
         const op = caseSensitive ? "_nlike" : "_nilike";
         return this.next({
-            where: this.mergeWhere({ [field]: { [op]: value } }),
+            where: this.mergeFieldOperator(field, { [op]: value }),
         });
     }
 
     isNull(field: TableColumn<S, T>, value: boolean) {
-        const existing = this.state.where?.[field];
         return this.next({
-            where: this.mergeWhere({
-                [field]: {
-                    ...(typeof existing === "object" ? existing : undefined),
-                    _is_null: value,
-                },
-            }),
+            where: this.mergeFieldOperator(field, { _is_null: value }),
         });
     }
 
@@ -201,8 +214,8 @@ export class HasuraTableBuilder<
             );
         }
         return this.next({
-            where: this.mergeWhere({
-                [this.state.primaryKey]: { _eq: value },
+            where: this.mergeFieldOperator(this.state.primaryKey, {
+                _eq: value,
             }),
         });
     }
@@ -281,7 +294,10 @@ export class HasuraTableBuilder<
         return this.aggregate({ aggregate: { count: true } });
     }
 
-    subscribe(next: (data: Result) => void): () => void {
+    subscribe(
+        next: (data: Result) => void,
+        error?: (error: unknown) => void,
+    ): () => void {
         const subscribeFn = this.state.executor.subscribe;
         if (!subscribeFn) {
             throw new Error("executor.subscribe is not configured");
@@ -301,6 +317,7 @@ export class HasuraTableBuilder<
                     ) as Result,
                 );
             },
+            error,
         });
     }
 

@@ -164,8 +164,9 @@ Ported from `ApiConstructor`, immutable (every method returns a new builder),
   insert-or-ignore), `update(data)`, `remove()`.
 - **Aggregates:** `aggregate({ aggregate, nodes })`, `count()`; output object
   type derived from the input as in TheFloorr's `TableAggregateOutput`.
-- **Subscriptions:** `subscribe(next)` — requires `executor.subscribe`,
-  returns the unsubscribe function.
+- **Subscriptions:** `subscribe(next, error?)` — requires `executor.subscribe`,
+  forwards executor errors to the optional `error` callback via the
+  observer's `error` property, returns the unsubscribe function.
 
 Dropped from the port: `self()` (meaningless once the builder is genuinely
 immutable), `isAggregate()`, the `mode || "list"` juggling (mode transitions

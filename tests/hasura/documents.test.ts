@@ -124,6 +124,9 @@ test("generateAggregateSelection ports TheFloorr behavior", () => {
     );
     expect(() => generateAggregateSelection({ max: [] as never }))
         .toThrow("max must have at least one column");
+    expect(() => generateAggregateSelection({})).toThrow(
+        "aggregate requires at least one aggregate function or nodes selection",
+    );
 });
 
 test("buildAggregateRequest wraps the aggregate selection", () => {

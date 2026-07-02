@@ -54,6 +54,18 @@ test("filters merge into where and land in variables", async () => {
     });
 });
 
+test("chaining filters on the same column merges operators instead of dropping them", async () => {
+    const mock = createMockExecutor({ User: [] });
+    await userBuilder(mock.executor)
+        .gt("age", 18)
+        .lt("age", 65, true);
+    expect(mock.requests[0]!.variables).toEqual({
+        where: {
+            age: { _gt: 18, _lte: 65 },
+        },
+    });
+});
+
 test("one() forces limit 1 and resolves the first row or null", async () => {
     const row = { id: "u1" as UserId, email: null };
     const mock = createMockExecutor({ User: [ row ] });
@@ -125,6 +137,16 @@ test("count() resolves the aggregate count object", async () => {
     expectTypeOf(result).toEqualTypeOf<{ aggregate: { count: number; }; }>();
 });
 
+test("aggregate({}) rejects with a stable error instead of sending a malformed document", async () => {
+    const mock = createMockExecutor({
+        User_aggregate: { aggregate: { count: 7 } },
+    });
+    await expect(Promise.resolve(userBuilder(mock.executor).aggregate({})))
+        .rejects.toThrow(
+            "aggregate requires at least one aggregate function or nodes selection",
+        );
+});
+
 test("select() re-types the result from the literal selection", async () => {
     const mock = createMockExecutor({ User: [ { id: "u1" } ] });
     const rows = await userBuilder(mock.executor).select("id");
@@ -172,6 +194,17 @@ test("subscribe() with an aggregate emits a subscription document", () => {
     expect(mock.requests[0]!.document).toBe(
         "subscription AggregateUser { User_aggregate { aggregate { count } } }",
     );
+});
+
+test("subscribe() forwards executor errors to the optional error callback", () => {
+    const mock = createMockExecutor();
+    const errors: unknown[] = [];
+    userBuilder(mock.executor)
+        .eq("active", true)
+        .subscribe(() => {}, (err) => errors.push(err));
+    const boom = new Error("boom");
+    mock.emitError(boom);
+    expect(errors).toEqual([ boom ]);
 });
 
 test("subscribe() without executor.subscribe throws", () => {
