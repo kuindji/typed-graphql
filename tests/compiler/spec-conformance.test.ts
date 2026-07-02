@@ -226,6 +226,47 @@ test("directive argument lists cannot be empty", () => {
         .toEqualTypeOf<true>();
 });
 
+test("a subscription must select exactly one root field", () => {
+    type SubSchema = {
+        defaultSchema: "public";
+        schemas: {
+            public: {
+                Query: { version: string };
+                Subscription: { tick: string; tock: string };
+            };
+        };
+    };
+
+    expectTypeOf<IsValidGraphQL<"subscription S { tick }", SubSchema>>()
+        .toEqualTypeOf<true>();
+
+    expectTypeOf<ValidateGraphQL<"subscription S { tick tock }", SubSchema>>()
+        .toMatchTypeOf<{ code: "SUBSCRIPTION_MULTIPLE_ROOT_FIELDS"; }>();
+
+    // Two response keys for the same field are still two root fields.
+    expectTypeOf<
+        ValidateGraphQL<"subscription S { a: tick b: tick }", SubSchema>
+    >().toMatchTypeOf<{ code: "SUBSCRIPTION_MULTIPLE_ROOT_FIELDS"; }>();
+
+    // Fields reached through a fragment spread count toward the root set.
+    expectTypeOf<
+        ValidateGraphQL<
+            "subscription S { ...F } fragment F on Subscription { tick tock }",
+            SubSchema
+        >
+    >().toMatchTypeOf<{ code: "SUBSCRIPTION_MULTIPLE_ROOT_FIELDS"; }>();
+    expectTypeOf<
+        IsValidGraphQL<
+            "subscription S { ...F } fragment F on Subscription { tick }",
+            SubSchema
+        >
+    >().toEqualTypeOf<true>();
+
+    // The same rule does not apply to queries.
+    expectTypeOf<IsValidGraphQL<"{ version echo }", Schema>>()
+        .toEqualTypeOf<true>();
+});
+
 test("bare-word literals are rejected for built-in scalar arguments", () => {
     expectTypeOf<ValidateGraphQL<"{ user(id: banana) { id } }", Schema>>()
         .toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();

@@ -13,6 +13,23 @@ export interface CompileSuccess<Result, Variables = {}> {
     variables: Variables;
 }
 
+type IsUnion<T, Whole = T> =
+    T extends unknown ? [Whole] extends [T] ? false : true : never;
+
+// Spec §5.2.3.1: a subscription selects exactly one root field. Fragment
+// fields are already flattened into the compiled result, and merged
+// selections of one field share a response key, so counting the result's
+// keys matches the spec's CollectFields grouping.
+type SingleRootViolation<Kind extends string, Result> =
+    Kind extends "subscription"
+        ? true extends IsUnion<keyof Result>
+            ? GraphQLError<
+                "SUBSCRIPTION_MULTIPLE_ROOT_FIELDS",
+                "a subscription must select exactly one root field"
+            >
+            : never
+        : never;
+
 type RootType<S extends GraphQLSchema, Kind extends string> =
     S extends { rootTypes: infer Roots }
         ? Kind extends keyof Roots
@@ -48,15 +65,17 @@ export type CompileGraphQL<
                 > extends infer Compiled
                     ? Compiled extends GraphQLError ? Compiled
                     : Compiled extends SelectionSuccess<infer Result, infer Uses>
-                        ? ResolveVariables<
+                        ? [SingleRootViolation<Kind, Result>] extends [never]
+                            ? ResolveVariables<
                             VariableSource,
                             Uses | OperationDirectiveUses,
                             S,
                             S["defaultSchema"]
-                        > extends infer Variables
-                            ? Variables extends GraphQLError ? Variables
-                            : CompileSuccess<Result, Variables>
-                            : never
+                            > extends infer Variables
+                                ? Variables extends GraphQLError ? Variables
+                                : CompileSuccess<Result, Variables>
+                                : never
+                            : SingleRootViolation<Kind, Result>
                         : GraphQLError<"SYNTAX_ERROR", "could not compile selection">
                     : never
                 : GraphQLError<"SYNTAX_ERROR", "could not select operation">
