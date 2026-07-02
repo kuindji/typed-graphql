@@ -52,6 +52,24 @@ function toConditionList(value: unknown): unknown[] {
         : [ value ];
 }
 
+// Detach captured filters from caller-owned objects so mutating a condition
+// after passing it in cannot reach into the builder's state. Only plain
+// object/array containers are copied; leaf values (primitives, Dates,
+// custom scalars) stay by reference.
+function cloneCondition<T>(value: T): T {
+    if (Array.isArray(value)) {
+        return value.map(cloneCondition) as T;
+    }
+    if (isPlainObject(value)) {
+        const copy: Record<string, unknown> = {};
+        for (const [ key, entry ] of Object.entries(value)) {
+            copy[key] = cloneCondition(entry);
+        }
+        return copy as T;
+    }
+    return value;
+}
+
 type BuilderMode =
     | "list"
     | "single"
@@ -158,14 +176,16 @@ export class HasuraTableBuilder<
             ...this.state.where,
             [field]: {
                 ...(isPlainObject(existing) ? existing : undefined),
-                ...operators,
+                ...cloneCondition(operators),
             },
         };
     }
 
     where(where: WhereInput<S, T>) {
         return this.next({
-            where: this.mergeWhere(where as Record<string, unknown>),
+            where: this.mergeWhere(
+                cloneCondition(where as Record<string, unknown>),
+            ),
         });
     }
 

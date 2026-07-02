@@ -111,6 +111,24 @@ test("where() conjoins repeated logical and column filters instead of overwritin
     });
 });
 
+test("mutating condition objects after passing them in does not affect the builder", async () => {
+    const mock = createMockExecutor({ User: [] });
+    const condition = { age: { _gt: 18 } };
+    const filtered = userBuilder(mock.executor).where(condition);
+    condition.age._gt = 99;
+    await filtered;
+    expect(mock.requests[0]!.variables.where).toEqual({ age: { _gt: 18 } });
+
+    const inMock = createMockExecutor({ User: [] });
+    const ids = [ "u1" as UserId ];
+    const inFiltered = userBuilder(inMock.executor).in("id", ids);
+    ids.push("u2" as UserId);
+    await inFiltered;
+    expect(inMock.requests[0]!.variables.where).toEqual({
+        id: { _in: [ "u1" ] },
+    });
+});
+
 test("one() forces limit 1 and resolves the first row or null", async () => {
     const row = { id: "u1" as UserId, email: null };
     const mock = createMockExecutor({ User: [ row ] });
