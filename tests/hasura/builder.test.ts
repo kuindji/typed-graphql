@@ -128,6 +128,19 @@ test("update and remove require a where filter and resolve affected_rows", async
         .rejects.toThrow("remove() requires a where filter");
 });
 
+test("an empty where filter does not bypass the update/remove guard", async () => {
+    const mock = createMockExecutor({ delete_User: { affected_rows: 1 } });
+    await expect(
+        Promise.resolve(
+            userBuilder(mock.executor).where({}).update({ email: null }),
+        ),
+    )
+        .rejects.toThrow("update() requires a where filter");
+    await expect(Promise.resolve(userBuilder(mock.executor).where({}).remove()))
+        .rejects.toThrow("remove() requires a where filter");
+    expect(mock.requests).toEqual([]);
+});
+
 test("count() resolves the aggregate count object", async () => {
     const mock = createMockExecutor({
         User_aggregate: { aggregate: { count: 7 } },

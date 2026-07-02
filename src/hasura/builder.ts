@@ -350,6 +350,13 @@ export class HasuraTableBuilder<
         }
     }
 
+    /** An empty _bool_exp matches every row, so a `{}` where must not
+     * satisfy the whole-table mutation guard any more than a missing one. */
+    private hasWhereFilter(): boolean {
+        return this.state.where !== undefined
+            && Object.keys(this.state.where).length > 0;
+    }
+
     private requireSelection(): string {
         if (this.state.selection === null) {
             throw new Error(
@@ -395,7 +402,7 @@ export class HasuraTableBuilder<
                     conflict: state.conflict,
                 });
             case "update":
-                if (state.where === undefined) {
+                if (!this.hasWhereFilter()) {
                     throw new Error("update() requires a where filter");
                 }
                 return buildUpdateRequest({
@@ -404,7 +411,7 @@ export class HasuraTableBuilder<
                     data: state.data,
                 });
             case "remove":
-                if (state.where === undefined) {
+                if (!this.hasWhereFilter()) {
                     throw new Error("remove() requires a where filter");
                 }
                 return buildDeleteRequest({
