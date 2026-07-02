@@ -129,3 +129,77 @@ test("aggregate with nodes and distinctOn", async () => {
         "query AggregateLook { Look_aggregate { aggregate { count } } }",
     );
 });
+
+// Ported from actions/chat.ts and look/save.ts: `.insert(...)` and
+// `.select("id").insert(...)` (typed returning).
+test("insert emits an insert mutation with returning selection", async () => {
+    const { client, mock } = makeClient({
+        insert_Look: { returning: [ { id: "l1" } ] },
+    });
+    await client.table("Look").select("id").insert({ title: "Spring" });
+    expect(mock.requests[0]!.document).toBe(
+        "mutation InsertLook($input: [Look_insert_input!]!) "
+            + "{ insert_Look(objects: $input) { returning { id } } }",
+    );
+    expect(mock.requests[0]!.variables).toEqual({
+        input: [ { title: "Spring" } ],
+    });
+});
+
+// Ported from bulk inserts using `.onConflict(false)` (ignore duplicates).
+test("insert with onConflict(false) ignores duplicates", async () => {
+    const { client, mock } = makeClient({
+        insert_Look: { returning: [] },
+    });
+    await client.table("Look")
+        .select("id")
+        .insert([ { title: "A" }, { title: "B" } ])
+        .onConflict(false);
+    expect(mock.requests[0]!.document).toBe(
+        "mutation InsertLook($input: [Look_insert_input!]!, "
+            + "$conflict: Look_on_conflict) "
+            + "{ insert_Look(objects: $input, on_conflict: $conflict) "
+            + "{ returning { id } } }",
+    );
+    expect(mock.requests[0]!.variables.conflict).toEqual({
+        constraint: "Look_pkey",
+        update_columns: [],
+    });
+});
+
+// Ported from actions/consultation.ts and look/save.ts: `.update(data).id(id)`.
+test("update by id emits an update mutation", async () => {
+    const { client, mock } = makeClient({
+        update_Consultation: { affected_rows: 1 },
+    });
+    await client.table("Consultation")
+        .update({ title: "Renamed" })
+        .id("c1");
+    expect(mock.requests[0]!.document).toBe(
+        "mutation UpdateConsultation($where: Consultation_bool_exp!, "
+            + "$input: Consultation_set_input!) "
+            + "{ update_Consultation(where: $where, _set: $input) "
+            + "{ affected_rows } }",
+    );
+    expect(mock.requests[0]!.variables).toEqual({
+        where: { id: { _eq: "c1" } },
+        input: { title: "Renamed" },
+    });
+});
+
+// Ported from ConsultationEditorSheet.tsx: `.remove().where({ id: { _in } })`.
+test("remove with an _in filter emits a delete mutation", async () => {
+    const { client, mock } = makeClient({
+        delete_Look: { affected_rows: 2 },
+    });
+    await client.table("Look")
+        .remove()
+        .where({ id: { _in: [ "l1", "l2" ] } });
+    expect(mock.requests[0]!.document).toBe(
+        "mutation DeleteLook($where: Look_bool_exp!) "
+            + "{ delete_Look(where: $where) { affected_rows } }",
+    );
+    expect(mock.requests[0]!.variables).toEqual({
+        where: { id: { _in: [ "l1", "l2" ] } },
+    });
+});
