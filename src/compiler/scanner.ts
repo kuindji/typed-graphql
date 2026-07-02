@@ -102,9 +102,35 @@ type TakeBlockStringBody<S extends string, Acc extends string = ""> =
             : Match<`${Acc}${Body}`, Rest>
     : GraphQLError<"SYNTAX_ERROR", "unterminated block string literal">;
 
+// SourceCharacter (spec §2.2) excludes C0 controls other than tab and the
+// line terminators, so a raw NUL/BEL/etc. must be escaped, not embedded.
+// Line terminators are handled by the string workers themselves (rejected
+// in quoted strings, kept in block strings), leaving this shared exclusion
+// set; tab stays valid.
+type ControlCharacter =
+    | "\u0000" | "\u0001" | "\u0002" | "\u0003" | "\u0004" | "\u0005"
+    | "\u0006" | "\u0007" | "\u0008" | "\u000b" | "\u000c" | "\u000e"
+    | "\u000f" | "\u0010" | "\u0011" | "\u0012" | "\u0013" | "\u0014"
+    | "\u0015" | "\u0016" | "\u0017" | "\u0018" | "\u0019" | "\u001a"
+    | "\u001b" | "\u001c" | "\u001d" | "\u001e" | "\u001f";
+
+// One containment check on the completed body instead of a per-character
+// test in the scan loop, which would tax every string on every compile.
+type RejectControlCharacters<R> =
+    R extends Match<infer Body extends string, string>
+        ? Body extends `${string}${ControlCharacter}${string}`
+            ? GraphQLError<
+                "SYNTAX_ERROR",
+                "control character in string literal must be escaped"
+            >
+            : R
+        : R;
+
 export type TakeString<S extends string> =
-    SkipIgnored<S> extends `"""${infer Rest}` ? TakeBlockStringBody<Rest>
-    : SkipIgnored<S> extends `"${infer Rest}` ? DriveString<TakeStringBody<Rest>>
+    SkipIgnored<S> extends `"""${infer Rest}`
+        ? RejectControlCharacters<TakeBlockStringBody<Rest>>
+    : SkipIgnored<S> extends `"${infer Rest}`
+        ? RejectControlCharacters<DriveString<TakeStringBody<Rest>>>
     : GraphQLError<"UNEXPECTED_TOKEN", "expected string literal">;
 
 // Comments are handled before whitespace: stripping the line terminator

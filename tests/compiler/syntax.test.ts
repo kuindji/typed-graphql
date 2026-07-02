@@ -58,6 +58,18 @@ test("strings and numeric literals are validated without token arrays", () => {
         .toEqualTypeOf<true>();
 });
 
+test("raw control characters inside string literals are rejected", () => {
+    expectTypeOf<ValidateGraphQL<'{ f(text: "a\u0007b") }', Schema>>()
+        .toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+    expectTypeOf<ValidateGraphQL<'{ f(text: "a\u0000b") }', Schema>>()
+        .toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+    expectTypeOf<ValidateGraphQL<'{ f(text: """a\u0007b""") }', Schema>>()
+        .toMatchTypeOf<{ code: "SYNTAX_ERROR"; }>();
+    // Tab is a valid SourceCharacter and stays allowed unescaped.
+    expectTypeOf<IsValidGraphQL<'{ f(text: "a\tb") }', Schema>>()
+        .toEqualTypeOf<true>();
+});
+
 test("include and skip directives affect result optionality", () => {
     expectTypeOf<GetReturnType<"{ id @include(if: true) }", Schema>>()
         .toEqualTypeOf<{ id: string }>();
