@@ -308,6 +308,7 @@ type CompileField<
     Fields,
     Visited extends string,
     Steps extends unknown[],
+    Depth extends unknown[],
 > = TakeFieldTail<Head["rest"], S, C["namespace"]> extends infer Tail
     ? Tail extends FieldTail<
         infer Rest extends string,
@@ -351,7 +352,8 @@ type CompileField<
                                     PossibleRuntimeTypes<S, C>
                                 >,
                                 Visited,
-                                [unknown, ...Steps]
+                                [unknown, ...Steps],
+                                Depth
                             >
                     : never
                 : Relation extends GraphQLRelation<infer Ref>
@@ -368,7 +370,8 @@ type CompileField<
                                         Target,
                                         Fragments,
                                         never,
-                                        Visited
+                                        Visited,
+                                        [unknown, ...Depth]
                                     > extends infer NestedResult
                                         ? NestedResult extends SelectionSuccess<
                                             infer NestedFields,
@@ -392,7 +395,8 @@ type CompileField<
                                                     PossibleRuntimeTypes<S, C>
                                                 >,
                                                 Visited,
-                                                [unknown, ...Steps]
+                                                [unknown, ...Steps],
+                                                Depth
                                             >
                                             : NestedResult
                                         : never
@@ -422,6 +426,7 @@ type CompileNamedFragment<
     Fields,
     Visited extends string,
     Steps extends unknown[],
+    Depth extends unknown[],
     Optional extends boolean,
     DirectiveUses,
 > = Name extends Visited
@@ -444,7 +449,8 @@ type CompileNamedFragment<
                                 Target,
                                 Fragments,
                                 never,
-                                Visited | Name
+                                Visited | Name,
+                                [unknown, ...Depth]
                             > extends infer FragmentResult
                                 ? FragmentResult extends SelectionSuccess<
                                     infer FragmentFields,
@@ -467,7 +473,8 @@ type CompileNamedFragment<
                                             | FragmentUses
                                         >,
                                         Visited,
-                                        [unknown, ...Steps]
+                                        [unknown, ...Steps],
+                                        Depth
                                     >
                                     : FragmentResult
                                 : never
@@ -489,6 +496,7 @@ type CompileInlineBody<
     Fields,
     Visited extends string,
     Steps extends unknown[],
+    Depth extends unknown[],
 > = TakeDirectives<Source, S, "INLINE_FRAGMENT", C["namespace"]> extends DirectivesResult<
     infer BeforeSelection extends string,
     infer Optional extends boolean,
@@ -504,7 +512,8 @@ type CompileInlineBody<
             Target,
             Fragments,
             never,
-            Visited
+            Visited,
+            [unknown, ...Depth]
         > extends infer InlineResult
             ? InlineResult extends SelectionSuccess<
                 infer InlineFields,
@@ -523,7 +532,8 @@ type CompileInlineBody<
                     >
                     | SelectionUse<DirectiveUses | InlineUses>,
                     Visited,
-                    [unknown, ...Steps]
+                    [unknown, ...Steps],
+                    Depth
                 >
                 : InlineResult
             : never
@@ -538,8 +548,9 @@ type CompileSpread<
     Fields,
     Visited extends string,
     Steps extends unknown[],
+    Depth extends unknown[],
 > = SkipIgnored<S0> extends `${"@" | "{"}${string}`
-    ? CompileInlineBody<S0, S, C, C, Fragments, Fields, Visited, Steps>
+    ? CompileInlineBody<S0, S, C, C, Fragments, Fields, Visited, Steps, Depth>
     : TakeName<S0> extends Match<
         infer Name extends string,
         infer Rest extends string
@@ -560,7 +571,8 @@ type CompileSpread<
                             Fragments,
                             Fields,
                             Visited,
-                            Steps
+                            Steps,
+                            Depth
                         >
                         : GraphQLError<
                             "FRAGMENT_TYPE_MISMATCH",
@@ -583,6 +595,7 @@ type CompileSpread<
                 Fields,
                 Visited,
                 Steps,
+                Depth,
                 Optional,
                 DirectiveUses
             >
@@ -597,8 +610,9 @@ type CompileSelectionWorker<
     Fields = never,
     Visited extends string = never,
     Steps extends unknown[] = [],
+    Depth extends unknown[] = [],
 > = Steps["length"] extends 100
-    ? SelectionChunk<Source, S, C, Fragments, Fields, Visited>
+    ? SelectionChunk<Source, S, C, Fragments, Fields, Visited, Depth>
     : SkipIgnored<Source> extends infer Rest extends string
         ? Rest extends ""
             ? [Fields] extends [never]
@@ -609,10 +623,10 @@ type CompileSelectionWorker<
                         : Conflicts
                     : never
         : Rest extends `...${infer AfterSpread}`
-            ? CompileSpread<AfterSpread, S, C, Fragments, Fields, Visited, Steps>
+            ? CompileSpread<AfterSpread, S, C, Fragments, Fields, Visited, Steps, Depth>
             : TakeFieldHead<Rest> extends infer Head
                 ? Head extends FieldHead<string | undefined, string, string>
-                    ? CompileField<Head, S, C, Fragments, Fields, Visited, Steps>
+                    ? CompileField<Head, S, C, Fragments, Fields, Visited, Steps, Depth>
                     : Head
                 : never
         : never;
@@ -624,8 +638,9 @@ interface SelectionChunk<
     Fragments,
     Fields,
     Visited extends string,
+    Depth extends unknown[],
 > {
-    __selectionChunk: [Source, S, C, Fragments, Fields, Visited];
+    __selectionChunk: [Source, S, C, Fragments, Fields, Visited, Depth];
 }
 
 type DriveSelection<R, Chunks extends unknown[] = []> =
@@ -637,7 +652,8 @@ type DriveSelection<R, Chunks extends unknown[] = []> =
             infer C,
             infer Fragments,
             infer Fields,
-            infer Visited
+            infer Visited,
+            infer Depth
         >
             ? DriveSelection<
                 CompileSelectionWorker<
@@ -646,12 +662,18 @@ type DriveSelection<R, Chunks extends unknown[] = []> =
                     C,
                     Fragments,
                     Fields,
-                    Visited
+                    Visited,
+                    [],
+                    Depth
                 >,
                 [unknown, ...Chunks]
             >
             : R;
 
+// Cross-level depth guard (fields, named fragments, inline fragments all
+// re-enter here). Without it, deep nesting overflowed tsc's instantiation
+// stack at ~43 levels — a TS2589 that silently widens IsValidGraphQL and
+// GetReturnType to `any` instead of failing.
 type RunSelection<
     Source extends string,
     S extends GraphQLSchema,
@@ -659,9 +681,15 @@ type RunSelection<
     Fragments,
     Fields = never,
     Visited extends string = never,
-> = DriveSelection<
-    CompileSelectionWorker<Source, S, C, Fragments, Fields, Visited>
->;
+    Depth extends unknown[] = [],
+> = Depth["length"] extends 32
+    ? GraphQLError<
+        "QUERY_TOO_COMPLEX",
+        "selection nesting exceeds compiler depth budget"
+    >
+    : DriveSelection<
+        CompileSelectionWorker<Source, S, C, Fragments, Fields, Visited, [], Depth>
+    >;
 
 type FieldKeys<Fields> =
     Fields extends FieldResult<infer Key, unknown, boolean, unknown> ? Key : never;

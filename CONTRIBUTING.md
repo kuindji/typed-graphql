@@ -17,6 +17,11 @@ lives in [README.md](./README.md).
   surface is intact.
 - **Perf budget:** `npm run perf` — runs `tsc --extendedDiagnostics` and gates
   deterministic counters against `scripts/perf-baseline.json`.
+- **Stress tests:** `tests/stress/` holds guard-trip tests that deliberately
+  drive the compiler to its scan/depth budgets. They are excluded from the
+  root tsconfig (and therefore from the perf gate, which would otherwise be
+  dominated by them) and are typechecked separately by `npm test` via
+  `npm run typecheck:stress`.
 
 ## Conventions
 

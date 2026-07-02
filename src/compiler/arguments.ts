@@ -247,6 +247,7 @@ type ValidateListValues<
     ItemInput,
     S,
     Namespace extends string,
+    Depth extends unknown[],
     Uses = never,
     Steps extends unknown[] = [],
 > = Steps["length"] extends 64
@@ -254,13 +255,14 @@ type ValidateListValues<
     : SkipIgnored<Source> extends infer Rest extends string
         ? Rest extends "" ? ArgumentsSuccess<Uses>
         : TakeValue<Rest> extends Match<infer Value, infer AfterValue extends string>
-            ? ValidateValue<Value, ItemInput, S, Namespace> extends infer Validated
+            ? ValidateValue<Value, ItemInput, S, Namespace, Depth> extends infer Validated
                 ? Validated extends ArgumentsSuccess<infer NewUses>
                     ? ValidateListValues<
                         AfterValue,
                         ItemInput,
                         S,
                         Namespace,
+                        Depth,
                         Uses | NewUses,
                         [unknown, ...Steps]
                     >
@@ -274,6 +276,7 @@ type ValidateObjectFields<
     Expected,
     S,
     Namespace extends string,
+    Depth extends unknown[],
     Seen = never,
     Uses = never,
     Steps extends unknown[] = [],
@@ -297,13 +300,14 @@ type ValidateObjectFields<
                             infer Value,
                             infer AfterValue extends string
                         >
-                            ? ValidateValue<Value, Expected[Name], S, Namespace> extends infer Validated
+                            ? ValidateValue<Value, Expected[Name], S, Namespace, Depth> extends infer Validated
                                 ? Validated extends ArgumentsSuccess<infer NewUses>
                                     ? ValidateObjectFields<
                                         AfterValue,
                                         Expected,
                                         S,
                                         Namespace,
+                                        Depth,
                                         Seen | Name,
                                         Uses | NewUses,
                                         [unknown, ...Steps]
@@ -316,13 +320,21 @@ type ValidateObjectFields<
             : TakeName<Rest>
         : never;
 
+// Depth guards the ValidateValue <-> ValidateObjectFields/ValidateListValues
+// recursion: breadth is capped per level (64 fields/values), but nesting was
+// unbounded and overflowed tsc's instantiation stack at ~85 levels.
 type ValidateValue<
     Value,
     Input,
     S = never,
     Namespace extends string = string,
-> =
-    Input extends GraphQLInput<infer Wire, infer App>
+    Depth extends unknown[] = [],
+> = Depth["length"] extends 32
+    ? GraphQLError<
+        "QUERY_TOO_COMPLEX",
+        "input value nesting exceeds compiler depth budget"
+    >
+    : Input extends GraphQLInput<infer Wire, infer App>
         ? Value extends VariableValue<infer Name>
             ? ArgumentsSuccess<VariableUse<Name, Input>>
         : Value extends LiteralValue<"null">
@@ -335,13 +347,15 @@ type ValidateValue<
                     Body,
                     GraphQLInput<Inner, ListItemApp<Inner, App>>,
                     S,
-                    Namespace
+                    Namespace,
+                    [unknown, ...Depth]
                 >
                 : ValidateValue<
                     Value,
                     GraphQLInput<Inner, ListItemApp<Inner, App>>,
                     S,
-                    Namespace
+                    Namespace,
+                    [unknown, ...Depth]
                 >
         : InputFields<S, Namespace, StripNonNull<Wire>> extends infer Fields
             ? [Fields] extends [never]
@@ -386,7 +400,7 @@ type ValidateValue<
                                 : never
                     : never
                 : Value extends LiteralValue<"object", infer Body extends string>
-                    ? ValidateObjectFields<Body, Fields, S, Namespace>
+                    ? ValidateObjectFields<Body, Fields, S, Namespace, [unknown, ...Depth]>
                     : GraphQLError<
                         "INVALID_ARGUMENT_VALUE",
                         `literal is incompatible with ${Wire}`
