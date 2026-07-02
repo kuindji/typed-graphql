@@ -25,6 +25,83 @@ export interface AggregateSelectionInput {
 
 type FieldArgument = { name: string; variable: string; };
 
+const GRAPHQL_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/;
+
+// Compile-time constraints on table()/select()/aggregate() are erased at
+// runtime, so every identifier that lands in document text verbatim is
+// re-checked here, at the single point where documents are assembled.
+function assertGraphQLName(value: string, what: string): void {
+    if (!GRAPHQL_NAME.test(value)) {
+        throw new Error(
+            `invalid GraphQL name for ${what}: ${JSON.stringify(value)}`,
+        );
+    }
+}
+
+// Selections are caller-supplied text (select()/customSelect()/
+// defaultSelections). A full parse is out of scope at runtime, but the
+// document shape is defended: braces and parens must balance and never
+// close more than they opened, so injected text cannot break out of the
+// `{ selection }` wrapper and plant fields or operations outside the
+// intended table field. Strings and comments are skipped so brace-like
+// argument values cannot trip the guard.
+function assertEnclosedSelection(selection: string): void {
+    let braces = 0;
+    let parens = 0;
+    for (let i = 0; i < selection.length; i++) {
+        const ch = selection[i];
+        if (ch === "\"") {
+            const block = selection.startsWith("\"\"\"", i);
+            let j = i + (block ? 3 : 1);
+            for (;;) {
+                if (j >= selection.length) {
+                    throw new Error(
+                        `unterminated string in selection: ${selection}`,
+                    );
+                }
+                if (selection[j] === "\\") {
+                    j += block && selection.startsWith("\"\"\"", j + 1)
+                        ? 4
+                        : block
+                        ? 1
+                        : 2;
+                    continue;
+                }
+                if (block ? selection.startsWith("\"\"\"", j) : selection[j] === "\"") {
+                    break;
+                }
+                j++;
+            }
+            i = j + (block ? 2 : 0);
+        } else if (ch === "#") {
+            const newline = selection.indexOf("\n", i);
+            i = newline === -1 ? selection.length : newline;
+        } else if (ch === "{") {
+            braces++;
+        } else if (ch === "}") {
+            if (--braces < 0) {
+                throw new Error(
+                    `selection must stay inside its enclosing braces: ${selection}`,
+                );
+            }
+        } else if (ch === "(") {
+            parens++;
+        } else if (ch === ")") {
+            if (--parens < 0) {
+                throw new Error(
+                    `unbalanced parentheses in selection: ${selection}`,
+                );
+            }
+        }
+    }
+    if (braces !== 0) {
+        throw new Error(`unbalanced braces in selection: ${selection}`);
+    }
+    if (parens !== 0) {
+        throw new Error(`unbalanced parentheses in selection: ${selection}`);
+    }
+}
+
 type ListRequestArgs = {
     table: string;
     selection: string;
@@ -37,6 +114,8 @@ type ListRequestArgs = {
 };
 
 export function buildListRequest(args: ListRequestArgs): GraphQLRequest {
+    assertGraphQLName(args.table, "table");
+    assertEnclosedSelection(args.selection);
     const kind = args.kind ?? "query";
     const defs: VariableDefinition[] = [];
     const fieldArgs: FieldArgument[] = [];
@@ -96,6 +175,8 @@ type InsertRequestArgs = {
 };
 
 export function buildInsertRequest(args: InsertRequestArgs): GraphQLRequest {
+    assertGraphQLName(args.table, "table");
+    assertEnclosedSelection(args.selection);
     const objects = Array.isArray(args.data) ? args.data : [ args.data ];
     const conflict: ConflictSpec | undefined = args.conflict === false
         ? { constraint: `${args.table}_pkey`, update_columns: [] }
@@ -134,6 +215,7 @@ export function buildUpdateRequest(args: {
     where: unknown;
     data: unknown;
 }): GraphQLRequest {
+    assertGraphQLName(args.table, "table");
     const name = `Update${args.table}`;
     return {
         document: buildOperationDocument({
@@ -157,6 +239,7 @@ export function buildDeleteRequest(args: {
     table: string;
     where: unknown;
 }): GraphQLRequest {
+    assertGraphQLName(args.table, "table");
     const name = `Delete${args.table}`;
     return {
         document: buildOperationDocument({
@@ -186,6 +269,7 @@ export function generateAggregateSelection(
     else if (input.count !== undefined) {
         const parts: string[] = [];
         if (input.count.columns !== undefined) {
+            assertGraphQLName(input.count.columns, "count column");
             parts.push(`columns: ${input.count.columns}`);
         }
         if (input.count.distinct !== undefined) {
@@ -204,6 +288,9 @@ export function generateAggregateSelection(
         if (columns.length === 0) {
             throw new Error(`${key} must have at least one column`);
         }
+        for (const column of columns) {
+            assertGraphQLName(column, `${key} column`);
+        }
         aggParts.push(`${key} { ${columns.join(" ")} }`);
     }
     const outputParts: string[] = [];
@@ -211,6 +298,9 @@ export function generateAggregateSelection(
         outputParts.push(`aggregate { ${aggParts.join(" ")} }`);
     }
     if (nodes !== undefined && nodes.length > 0) {
+        for (const column of nodes) {
+            assertGraphQLName(column, "nodes column");
+        }
         outputParts.push(`nodes { ${nodes.join(" ")} }`);
     }
     if (outputParts.length === 0) {
@@ -236,6 +326,7 @@ type AggregateRequestArgs = {
 export function buildAggregateRequest(
     args: AggregateRequestArgs,
 ): GraphQLRequest {
+    assertGraphQLName(args.table, "table");
     const kind = args.kind ?? "query";
     const defs: VariableDefinition[] = [];
     const fieldArgs: FieldArgument[] = [];

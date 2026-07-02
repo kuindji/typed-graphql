@@ -147,3 +147,63 @@ test("buildAggregateRequest wraps the aggregate selection", () => {
     expect(request.kind).toBe("subscription");
     expect(request.resultPath).toEqual([ "User_aggregate" ]);
 });
+
+test("table names are validated as GraphQL names at build time", () => {
+    // The type constraint on table() is erased at runtime; a raw string
+    // reaching the document builders must not be interpolated verbatim.
+    const evil = "User { id } evil";
+    expect(() => buildListRequest({ table: evil, selection: "id" }))
+        .toThrow('invalid GraphQL name for table: "User { id } evil"');
+    expect(() => buildInsertRequest({ table: evil, selection: "id", data: {} }))
+        .toThrow("invalid GraphQL name for table");
+    expect(() => buildUpdateRequest({ table: evil, where: { a: 1 }, data: {} }))
+        .toThrow("invalid GraphQL name for table");
+    expect(() => buildDeleteRequest({ table: evil, where: { a: 1 } }))
+        .toThrow("invalid GraphQL name for table");
+    expect(() => buildAggregateRequest({ table: evil }))
+        .toThrow("invalid GraphQL name for table");
+});
+
+test("a selection cannot escape its enclosing braces", () => {
+    // Balanced overall, but the leading } closes the wrapping field and
+    // plants a sibling root field outside the intended table.
+    expect(() =>
+        buildListRequest({
+            table: "User",
+            selection: "id } Secret { token",
+        })
+    ).toThrow("selection must stay inside its enclosing braces");
+    // Unbalanced selections malform the document.
+    expect(() => buildListRequest({ table: "User", selection: "id {" }))
+        .toThrow("unbalanced braces in selection");
+    expect(() =>
+        buildInsertRequest({
+            table: "User",
+            selection: "id } } mutation Evil { x",
+            data: {},
+        })
+    ).toThrow("selection must stay inside its enclosing braces");
+});
+
+test("brace-like content inside strings and comments does not trip the selection guard", () => {
+    const request = buildListRequest({
+        table: "User",
+        selection: 'posts(kind: "}") { id # {\n title }',
+    });
+    expect(request.document).toBe(
+        'query ListUsers { User { posts(kind: "}") { id # {\n title } } }',
+    );
+    expect(() =>
+        buildListRequest({ table: "User", selection: 'id name(x: "' })
+    ).toThrow("unterminated string in selection");
+});
+
+test("aggregate column names are validated as GraphQL names", () => {
+    expect(() => generateAggregateSelection({ max: [ "id) { x" ] }))
+        .toThrow('invalid GraphQL name for max column: "id) { x"');
+    expect(() =>
+        generateAggregateSelection({ count: { columns: "id) x" } })
+    ).toThrow("invalid GraphQL name for count column");
+    expect(() => generateAggregateSelection({ count: true }, [ "a b" ]))
+        .toThrow("invalid GraphQL name for nodes column");
+});
