@@ -233,6 +233,53 @@ test("arguments and variables are validated and inferred in the same pass", () =
     >().toMatchTypeOf<{ code: "MISSING_REQUIRED_ARGUMENT"; }>();
 });
 
+test("a variable used at multiple branded positions intersects their application types", () => {
+    type UserId = string & { readonly __brand: "User" };
+    type PostId = string & { readonly __brand: "Post" };
+
+    type BrandSchema = {
+        defaultSchema: "public";
+        schemas: {
+            public: {
+                Query: { version: string; pick: string };
+                User: { id: UserId };
+                Post: { id: PostId };
+            };
+        };
+        relations: {
+            public: {
+                Query: {
+                    user: { type: "User"; nullable: true };
+                    post: { type: "Post"; nullable: true };
+                };
+            };
+        };
+        arguments: {
+            public: {
+                Query: {
+                    user: { id: GraphQLInput<"ID!", UserId> };
+                    post: { id: GraphQLInput<"ID!", PostId> };
+                    pick: { kind: GraphQLInput<"Kind!", "a" | "b"> };
+                };
+            };
+        };
+    };
+
+    // The single runtime value flows into both a UserId and a PostId position,
+    // so it must satisfy both — the intersection, not the union (a UserId must
+    // not be silently acceptable where a PostId is expected).
+    type SharedVar =
+        "query Q($id: ID!) { user(id: $id) { id } post(id: $id) { id } }";
+    expectTypeOf<GetVariables<SharedVar, BrandSchema>>()
+        .toEqualTypeOf<{ id: UserId & PostId }>();
+
+    // A union that lives inside a single use's application type must be
+    // preserved as a union, not collapsed by the cross-use intersection.
+    type SingleUnionUse = "query Q($k: Kind!) { pick(kind: $k) }";
+    expectTypeOf<GetVariables<SingleUnionUse, BrandSchema>>()
+        .toEqualTypeOf<{ k: "a" | "b" }>();
+});
+
 test("directive variables are collected and unused variables are rejected", () => {
     type Query = "query Q($show: Boolean!) { version @include(if: $show) }";
 

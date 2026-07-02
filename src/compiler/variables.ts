@@ -228,8 +228,21 @@ type DefinedNames<Definitions> =
 type UnusedNames<Definitions, Uses> =
     Exclude<DefinedNames<Definitions>, UsedNames<Uses>>;
 
+// A variable carries one runtime value that flows into every argument position
+// it is used at, so its value type must satisfy all of them — the intersection
+// of the per-use application types, not their union (e.g. a value used where
+// both `UserId` and `PostId` are expected is `UserId & PostId`, not
+// `UserId | PostId`, which would let a `UserId` leak into the `PostId` slot).
+// Distribution happens per use inside a contravariant function-parameter
+// position, so a union that lives *within* a single use's application type
+// (an enum-like `"a" | "b"`) is preserved rather than collapsed to `never`.
 type VariableValue<Uses, Name extends string> =
-    VariableApplicationType<Extract<Uses, { name: Name }>>;
+    (Extract<Uses, { name: Name }> extends infer Use
+        ? Use extends VariableUse<Name>
+            ? (arg: VariableApplicationType<Use>) => void
+            : never
+        : never) extends (arg: infer Value) => void ? Value
+        : never;
 
 type RequiredVariableNames<Uses, Definitions> = {
     [Name in UsedNames<Uses>]:
