@@ -308,6 +308,37 @@ test("Int literals outside the 32-bit signed range are rejected", () => {
         .toMatchTypeOf<{ code: "INT_OUT_OF_RANGE"; }>();
 });
 
+test("defined fragments must be used (spec §5.5.1.4)", () => {
+    // A fragment that is never spread anywhere is rejected...
+    expectTypeOf<
+        ValidateGraphQL<"{ version } fragment Unused on Query { version }", Schema>
+    >().toMatchTypeOf<{ code: "UNUSED_FRAGMENT"; }>();
+
+    // ...even when its type condition is bogus (previously passed silently).
+    expectTypeOf<
+        ValidateGraphQL<
+            "{ version } fragment Broken on Nonexistent { whatever }",
+            Schema
+        >
+    >().toMatchTypeOf<{ code: "UNUSED_FRAGMENT"; }>();
+
+    // A spread fragment is still accepted.
+    expectTypeOf<
+        IsValidGraphQL<
+            "query Q($id: ID!) { user(id: $id) { ...F } } fragment F on User { id name }",
+            Schema
+        >
+    >().toEqualTypeOf<true>();
+
+    // A fragment reached only through another fragment still counts as used.
+    expectTypeOf<
+        IsValidGraphQL<
+            "query Q($id: ID!) { user(id: $id) { ...A } } fragment A on User { id ...B } fragment B on User { name }",
+            Schema
+        >
+    >().toEqualTypeOf<true>();
+});
+
 test("a subscription must select exactly one root field", () => {
     type SubSchema = {
         defaultSchema: "public";
