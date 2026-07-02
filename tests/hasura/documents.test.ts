@@ -115,6 +115,10 @@ test("generateAggregateSelection ports TheFloorr behavior", () => {
     expect(generateAggregateSelection({ count: true })).toBe(
         "aggregate { count }",
     );
+    // empty argument lists are invalid GraphQL — bare count instead
+    expect(generateAggregateSelection({ count: {} })).toBe(
+        "aggregate { count }",
+    );
     expect(generateAggregateSelection(
         { count: { columns: "id", distinct: true }, max: [ "age" ] },
         [ "id", "email" ],

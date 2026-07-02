@@ -119,7 +119,8 @@ export type WhereInput<
     & {
         _and?: WhereInput<S, T> | WhereInput<S, T>[];
         _or?: WhereInput<S, T> | WhereInput<S, T>[];
-        _not?: WhereInput<S, T> | WhereInput<S, T>[];
+        // Hasura's bool_exp takes a single expression for _not, unlike _and/_or.
+        _not?: WhereInput<S, T>;
     }
     & WhereColumns<S, T>
     & WhereRelations<S, T>;

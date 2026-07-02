@@ -28,9 +28,13 @@ test("WhereInput narrows operator values by column type", () => {
         age: { _gte: 18 },
         email: { _ilike: "%@x.com", _is_null: false },
         _or: [ { active: { _eq: true } } ],
+        _not: { active: { _eq: false } },
         posts: { title: { _like: "a%" } },
     };
     void ok;
+    // @ts-expect-error _not takes a single expression, not an array
+    const badNot: W = { _not: [ { active: { _eq: false } } ] };
+    void badNot;
     // @ts-expect-error _eq value must match the column type
     const badValue: W = { age: { _eq: "18" } };
     void badValue;

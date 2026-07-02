@@ -191,7 +191,10 @@ export function generateAggregateSelection(
         if (input.count.distinct !== undefined) {
             parts.push(`distinct: ${input.count.distinct ? "true" : "false"}`);
         }
-        aggParts.push(`count(${parts.join(", ")})`);
+        // GraphQL forbids empty argument lists; bare count counts all rows.
+        aggParts.push(
+            parts.length === 0 ? "count" : `count(${parts.join(", ")})`,
+        );
     }
     for (const key of [ "max", "min", "avg", "sum" ] as const) {
         const columns = input[key];
