@@ -739,9 +739,14 @@ interface SelectionChunk<
     __selectionChunk: [Source, S, C, Fragments, Fields, Visited, Depth];
 }
 
+// The chunk cap is the per-level width budget: each chunk unit covers 100
+// fields/spreads, so a cap of 3 bounds a selection set at 300 entries.
+// FieldConflicts compares fields pairwise (O(N^2)); around 600 fields that
+// overflowed tsc's instantiation limit as a TS2589 (or, in a warm program,
+// an unobservable errorType) instead of a diagnostic.
 type DriveSelection<R, Chunks extends unknown[] = []> =
-    Chunks["length"] extends 64
-        ? GraphQLError<"QUERY_TOO_COMPLEX", "selection exceeds compiler budget">
+    Chunks["length"] extends 3
+        ? GraphQLError<"QUERY_TOO_COMPLEX", "selection set exceeds compiler width budget">
         : R extends SelectionChunk<
             infer Source,
             infer S,

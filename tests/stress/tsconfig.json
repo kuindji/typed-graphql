@@ -3,5 +3,11 @@
     "include": [
         "../../src/**/*.ts",
         "./**/*.ts"
+    ],
+    // The root tsconfig excludes tests/stress; without this override that
+    // exclude is inherited and silently empties this project of its own
+    // test files.
+    "exclude": [
+        "../../node_modules"
     ]
 }
