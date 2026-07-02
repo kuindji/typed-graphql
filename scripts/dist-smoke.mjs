@@ -52,6 +52,9 @@ for (
     const [ subpath, expected ] of [
         [ "runtime", [
             "extractResult",
+            "extractErrors",
+            "unwrapResponse",
+            "GraphQLResponseError",
             "buildOperationDocument",
             "buildFieldArguments",
         ] ],

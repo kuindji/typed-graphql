@@ -23,13 +23,81 @@ export interface GraphQLObserver {
 }
 
 export interface GraphQLExecutor {
-    /** Resolves with the root `data` object of the GraphQL response. */
+    /** Resolves with the root `data` object of the GraphQL response.
+     *  Executors are expected to surface the response `errors` list as a
+     *  rejection instead of returning partial data silently —
+     *  `unwrapResponse` does exactly that for a standard envelope. */
     execute: (request: GraphQLRequest) => Promise<unknown>;
     /** Required only when subscriptions are used. Returns unsubscribe. */
     subscribe?: (
         request: GraphQLRequest,
         observer: GraphQLObserver,
     ) => () => void;
+}
+
+/** One error entry from a GraphQL response `errors` list (spec §7.1.2). */
+export interface GraphQLResponseErrorItem {
+    message: string;
+    locations?: readonly { line: number; column: number; }[];
+    path?: readonly (string | number)[];
+    extensions?: Record<string, unknown>;
+}
+
+/** Thrown by `unwrapResponse` when a response carries a non-empty `errors`
+ *  list. Exposes the original list so callers can inspect paths and
+ *  extensions. */
+export class GraphQLResponseError extends Error {
+    readonly errors: readonly GraphQLResponseErrorItem[];
+
+    constructor(errors: readonly GraphQLResponseErrorItem[]) {
+        const messages = errors.map((error) => error.message).join("; ");
+        super(
+            `GraphQL request failed with ${errors.length} error${
+                errors.length === 1 ? "" : "s"
+            }: ${messages}`,
+        );
+        this.name = "GraphQLResponseError";
+        this.errors = errors;
+    }
+}
+
+/** Read the `errors` list from a GraphQL response envelope. Anything that
+ *  is not an envelope with a non-empty `errors` array yields []. */
+export function extractErrors(
+    response: unknown,
+): GraphQLResponseErrorItem[] {
+    if (
+        response === null || response === undefined
+        || typeof response !== "object"
+    ) {
+        return [];
+    }
+    const errors = (response as Record<string, unknown>)["errors"];
+    return Array.isArray(errors) ? errors : [];
+}
+
+/** Unwrap a standard GraphQL response envelope into its root `data`,
+ *  throwing GraphQLResponseError when the response carries errors. Meant
+ *  for executors: `execute: async (req) => unwrapResponse(await post(req))`.
+ *  A value that is not an envelope at all throws a plain Error instead of
+ *  being silently treated as empty data. */
+export function unwrapResponse(response: unknown): unknown {
+    if (
+        response === null || response === undefined
+        || typeof response !== "object"
+    ) {
+        throw new Error("GraphQL response is not an object");
+    }
+    const errors = extractErrors(response);
+    if (errors.length > 0) {
+        throw new GraphQLResponseError(errors);
+    }
+    if (!("data" in response)) {
+        throw new Error(
+            'GraphQL response has neither "data" nor "errors"',
+        );
+    }
+    return (response as Record<string, unknown>)["data"] ?? null;
 }
 
 /** Unwrap the executor's root data along resultPath. A missing or

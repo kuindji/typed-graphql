@@ -8,5 +8,11 @@ export type {
     GraphQLObserver,
     GraphQLRequest,
     GraphQLRequestKind,
+    GraphQLResponseErrorItem,
 } from "./request.js";
-export { extractResult } from "./request.js";
+export {
+    extractErrors,
+    extractResult,
+    GraphQLResponseError,
+    unwrapResponse,
+} from "./request.js";
