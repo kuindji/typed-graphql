@@ -1,6 +1,6 @@
 {
     "name": "@kuindji/typed-graphql",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "description": "Compile-time GraphQL validation and type inference for TypeScript",
     "author": "Ivan Kuindzhi",
     "license": "MIT",
@@ -49,6 +49,7 @@
         "dist",
         "src",
         "README.md",
+        "CHANGELOG.md",
         "LICENSE"
     ],
     "scripts": {
