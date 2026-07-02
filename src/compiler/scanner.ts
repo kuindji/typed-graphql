@@ -80,10 +80,18 @@ type TakeStringBody<
         ? TakeStringBody<Rest, `${Acc}${C}`, [unknown, ...Steps]>
     : GraphQLError<"SYNTAX_ERROR", "unterminated string literal">;
 
-type DriveString<R> =
-    R extends { __chunk: [infer S extends string, infer Acc extends string] }
-        ? DriveString<TakeStringBody<S, Acc>>
-        : R;
+// Same 64-chunk cap as DelimitedDrive/DriveSelection: without it an
+// arbitrarily long string literal accumulates one string type per character
+// until tsc runs out of heap.
+type DriveString<R, Chunks extends unknown[] = []> =
+    Chunks["length"] extends 64
+        ? GraphQLError<
+            "QUERY_TOO_COMPLEX",
+            "string literal exceeds compiler scan budget"
+        >
+        : R extends { __chunk: [infer S extends string, infer Acc extends string] }
+            ? DriveString<TakeStringBody<S, Acc>, [unknown, ...Chunks]>
+            : R;
 
 // A `"""` preceded by `\` is the block-string escape (spec §2.9.4), not the
 // terminator; the escape is kept verbatim in the body.
