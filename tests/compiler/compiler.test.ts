@@ -105,6 +105,26 @@ type AdvancedSchema = {
                     multiple: true;
                 };
             };
+            User: {
+                counterpart: {
+                    type: "Post";
+                    nullable: true;
+                };
+                counterparts: {
+                    type: "Post";
+                    multiple: true;
+                };
+            };
+            Post: {
+                counterpart: {
+                    type: "User";
+                    nullable: true;
+                };
+                counterparts: {
+                    type: "User";
+                    nullable: true;
+                };
+            };
         };
     };
     arguments: {
@@ -543,11 +563,39 @@ test("interfaces, unions, and abstract fragment overlaps are validated", () => {
     }>();
 
     expectTypeOf<
-        IsValidGraphQL<
+        ValidateGraphQL<
             "{ results { ... on User { same: name } ... on Post { same: title } } }",
             AdvancedSchema
         >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+
+    expectTypeOf<
+        IsValidGraphQL<
+            "{ results { ... on User { same: name } ... on Post { same: id } } }",
+            AdvancedSchema
+        >
     >().toEqualTypeOf<true>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            "{ results { ... on User { c: counterpart { x: title } } ... on Post { c: counterpart { x: name } } } }",
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+
+    expectTypeOf<
+        IsValidGraphQL<
+            "{ results { ... on User { c: counterpart { x: id } } ... on Post { c: counterpart { x: id } } } }",
+            AdvancedSchema
+        >
+    >().toEqualTypeOf<true>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            "{ results { ... on User { c: counterparts { id } } ... on Post { c: counterparts { id } } } }",
+            AdvancedSchema
+        >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
 
     expectTypeOf<
         ValidateGraphQL<

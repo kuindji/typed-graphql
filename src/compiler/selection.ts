@@ -244,6 +244,68 @@ interface ObjectFieldValue<
     relation: Relation;
 }
 
+// Spec §5.3.2 SameResponseShape: fields merged under mutually exclusive type
+// conditions may keep different names and arguments, but their response
+// shapes must still match — identical leaf types, identical list/null
+// wrapping, and recursively shape-compatible nested selections paired by
+// response key. WrapRelation over a marker type fingerprints the wrapping.
+type SameResponseShape<
+    Left,
+    Right,
+    Key extends string,
+    Depth extends unknown[],
+> = Depth["length"] extends 16
+    ? GraphQLError<
+        "QUERY_TOO_COMPLEX",
+        "field merge nesting exceeds compiler depth budget"
+    >
+    : [Left] extends [
+        ObjectFieldValue<
+            infer LeftFields,
+            infer LeftRelation extends GraphQLRelation
+        >,
+    ]
+        ? [Right] extends [
+            ObjectFieldValue<
+                infer RightFields,
+                infer RightRelation extends GraphQLRelation
+            >,
+        ]
+            ? SameType<
+                WrapRelation<0, LeftRelation>,
+                WrapRelation<0, RightRelation>
+            > extends true
+                ? NestedResponseShapes<LeftFields, RightFields, Depth>
+                : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
+            : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
+        : [Right] extends [ObjectFieldValue<unknown, GraphQLRelation>]
+            ? GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
+        : SameType<Left, Right> extends true ? never
+        : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>;
+
+type NestedResponseShapes<LeftFields, RightFields, Depth extends unknown[]> =
+    LeftFields extends FieldResult<
+        infer NestedKey,
+        infer Value,
+        boolean,
+        unknown,
+        string,
+        string,
+        string
+    >
+        ? RightFields extends FieldResult<
+            NestedKey,
+            infer OtherValue,
+            boolean,
+            unknown,
+            string,
+            string,
+            string
+        >
+            ? SameResponseShape<Value, OtherValue, NestedKey, [unknown, ...Depth]>
+            : never
+        : never;
+
 // Same response key with an overlapping type condition: per spec §5.3.2 the
 // two selections must merge, so a differing sub-selection recurses into a
 // conflict check of the combined nested fields instead of being an error.
@@ -266,7 +328,9 @@ type FieldConflict<Left, Right, Depth extends unknown[] = []> =
             infer OtherArgs,
             infer OtherCondition
         >
-            ? [Extract<Condition, OtherCondition>] extends [never] ? never
+            ? [Extract<Condition, OtherCondition>] extends [never]
+                ? SameType<Value, OtherValue> extends true ? never
+                : SameResponseShape<Value, OtherValue, Key, [unknown, ...Depth]>
             : SameType<FieldName, OtherFieldName> extends true
                 ? SameArguments<Args, OtherArgs> extends true
                     ? SameType<Value, OtherValue> extends true ? never
