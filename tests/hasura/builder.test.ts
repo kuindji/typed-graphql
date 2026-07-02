@@ -1,0 +1,191 @@
+import { expect, test } from "bun:test";
+import { expectTypeOf } from "expect-type";
+
+import { HasuraTableBuilder } from "../../src/hasura/builder.js";
+import type { GraphQLExecutor } from "../../src/runtime/request.js";
+import {
+    createMockExecutor,
+    type TestSchema,
+    type UserId,
+} from "./fixtures.js";
+
+function userBuilder(executor: GraphQLExecutor) {
+    return new HasuraTableBuilder<
+        TestSchema,
+        "User",
+        { id: UserId; email: string | null; },
+        Partial<
+            { id: UserId; email: string | null; age: number; active: boolean; }
+        >,
+        UserId
+    >({
+        table: "User",
+        executor,
+        mode: "list",
+        selection: "id email",
+        primaryKey: "id",
+    });
+}
+
+test("await on a list builder resolves [] for a null payload", async () => {
+    const mock = createMockExecutor(null);
+    const result = await userBuilder(mock.executor);
+    expect(result).toEqual([]);
+    expect(mock.requests[0]!.document).toBe(
+        "query ListUsers { User { id email } }",
+    );
+});
+
+test("filters merge into where and land in variables", async () => {
+    const mock = createMockExecutor({ User: [] });
+    await userBuilder(mock.executor)
+        .eq("active", true)
+        .gt("age", 18, true)
+        .like("email", "%@x.com")
+        .isNull("email", false)
+        .limit(10);
+    expect(mock.requests[0]!.variables).toEqual({
+        where: {
+            active: { _eq: true },
+            age: { _gte: 18 },
+            email: { _ilike: "%@x.com", _is_null: false },
+        },
+        limit: 10,
+    });
+});
+
+test("one() forces limit 1 and resolves the first row or null", async () => {
+    const row = { id: "u1" as UserId, email: null };
+    const mock = createMockExecutor({ User: [ row ] });
+    const single = await userBuilder(mock.executor).eq("active", true).one();
+    expect(single).toEqual(row);
+    expect(mock.requests[0]!.variables.limit).toBe(1);
+
+    const empty = createMockExecutor({ User: [] });
+    const missing = await userBuilder(empty.executor).one();
+    expect(missing).toBeNull();
+});
+
+test("id() uses the configured primary key and throws without one", async () => {
+    const mock = createMockExecutor({ User: [] });
+    await userBuilder(mock.executor).id("u1" as UserId).one();
+    expect(mock.requests[0]!.variables.where).toEqual({
+        id: { _eq: "u1" },
+    });
+
+    const noPk = new HasuraTableBuilder({
+        table: "User",
+        executor: mock.executor,
+        mode: "list",
+        selection: "id",
+        primaryKey: null,
+    });
+    expect(() => noPk.id("u1")).toThrow(
+        "User has no primary key configured",
+    );
+});
+
+test("insert resolves the returning list", async () => {
+    const mock = createMockExecutor({
+        insert_User: { returning: [ { id: "u1", email: null } ] },
+    });
+    const rows = await userBuilder(mock.executor)
+        .insert({ id: "u1" as UserId })
+        .onConflict(false);
+    expect(rows).toEqual([ { id: "u1" as UserId, email: null } ]);
+    expect(mock.requests[0]!.variables.conflict).toEqual({
+        constraint: "User_pkey",
+        update_columns: [],
+    });
+});
+
+test("update and remove require a where filter and resolve affected_rows", async () => {
+    const mock = createMockExecutor({ update_User: { affected_rows: 3 } });
+    const updated = await userBuilder(mock.executor)
+        .eq("active", false)
+        .update({ email: null });
+    expect(updated).toEqual({ affected_rows: 3 });
+    expectTypeOf(updated).toEqualTypeOf<{ affected_rows: number; }>();
+
+    // Promise.resolve() adopts the thenable so bun's .rejects sees a Promise
+    await expect(
+        Promise.resolve(userBuilder(mock.executor).update({ email: null })),
+    )
+        .rejects.toThrow("update() requires a where filter");
+    await expect(Promise.resolve(userBuilder(mock.executor).remove()))
+        .rejects.toThrow("remove() requires a where filter");
+});
+
+test("count() resolves the aggregate count object", async () => {
+    const mock = createMockExecutor({
+        User_aggregate: { aggregate: { count: 7 } },
+    });
+    const result = await userBuilder(mock.executor).count();
+    expect(result).toEqual({ aggregate: { count: 7 } });
+    expectTypeOf(result).toEqualTypeOf<{ aggregate: { count: number; }; }>();
+});
+
+test("select() re-types the result from the literal selection", async () => {
+    const mock = createMockExecutor({ User: [ { id: "u1" } ] });
+    const rows = await userBuilder(mock.executor).select("id");
+    expectTypeOf(rows).toEqualTypeOf<{ id: UserId; }[]>();
+    expect(mock.requests[0]!.document).toBe(
+        "query ListUsers { User { id } }",
+    );
+});
+
+test("select() rejects invalid selections at compile time", () => {
+    const mock = createMockExecutor(null);
+    // @ts-expect-error "nope" is not a User field
+    userBuilder(mock.executor).select("nope");
+});
+
+test("executing without a selection throws", async () => {
+    const mock = createMockExecutor(null);
+    const builder = new HasuraTableBuilder({
+        table: "User",
+        executor: mock.executor,
+        mode: "list",
+        selection: null,
+        primaryKey: null,
+    });
+    await expect(Promise.resolve(builder as PromiseLike<unknown>)).rejects
+        .toThrow('No selection for table "User"');
+});
+
+test("subscribe() unwraps payloads and returns unsubscribe", () => {
+    const mock = createMockExecutor();
+    const seen: unknown[] = [];
+    const unsubscribe = userBuilder(mock.executor)
+        .eq("active", true)
+        .subscribe((rows) => seen.push(rows));
+    expect(mock.requests[0]!.kind).toBe("subscription");
+    mock.emit({ User: [ { id: "u1", email: null } ] });
+    expect(seen).toEqual([ [ { id: "u1", email: null } ] ]);
+    unsubscribe();
+    expect(mock.wasUnsubscribed()).toBe(true);
+});
+
+test("subscribe() with an aggregate emits a subscription document", () => {
+    const mock = createMockExecutor();
+    userBuilder(mock.executor).count().subscribe(() => {});
+    expect(mock.requests[0]!.document).toBe(
+        "subscription AggregateUser { User_aggregate { aggregate { count } } }",
+    );
+});
+
+test("subscribe() without executor.subscribe throws", () => {
+    const bare: GraphQLExecutor = { execute: async () => null };
+    expect(() => userBuilder(bare).subscribe(() => {})).toThrow(
+        "executor.subscribe is not configured",
+    );
+});
+
+test("builders are immutable — chaining never mutates the source", async () => {
+    const mock = createMockExecutor({ User: [] });
+    const base = userBuilder(mock.executor);
+    const filtered = base.eq("active", true);
+    expect(filtered).not.toBe(base);
+    await base;
+    expect(mock.requests[0]!.variables).toEqual({});
+});

@@ -1,0 +1,399 @@
+// Immutable chainable Hasura table builder — a cleaned-up port of
+// TheFloorr's ApiConstructor. Every method returns a new builder; awaiting
+// the builder compiles state into a GraphQLRequest and runs it through the
+// injected executor. Deviations from TheFloorr are documented in
+// docs/superpowers/specs/2026-07-02-phase3-runtime-construction-design.md:
+// one() sets limit 1, update/remove require a where filter, subscriptions
+// always emit subscription documents, and there is no self()/isAggregate().
+
+import type { GraphQLError } from "../diagnostics.js";
+import type { GetSelectionType, ValidateSelection } from "../index.js";
+import {
+    extractResult,
+    type GraphQLExecutor,
+    type GraphQLRequest,
+} from "../runtime/request.js";
+import type { GraphQLSchema } from "../schema.js";
+import {
+    type AggregateSelectionInput,
+    buildAggregateRequest,
+    buildDeleteRequest,
+    buildInsertRequest,
+    buildListRequest,
+    buildUpdateRequest,
+    type ConflictSpec,
+} from "./documents.js";
+import type {
+    AggregateResult,
+    HasuraTableName,
+    NonEmptyArray,
+    OrderBy,
+    StringColumn,
+    TableAggregateInput,
+    TableColumn,
+    TableRow,
+    WhereInput,
+} from "./inputs.js";
+
+export type NoSelection = GraphQLError<
+    "NO_SELECTION",
+    "Call select()/customSelect() or configure a default selection for this table"
+>;
+
+type BuilderMode =
+    | "list"
+    | "single"
+    | "aggregate"
+    | "insert"
+    | "update"
+    | "remove";
+
+export interface BuilderState {
+    table: string;
+    executor: GraphQLExecutor;
+    mode: BuilderMode;
+    selection: string | null;
+    primaryKey: string | null;
+    where?: Record<string, unknown>;
+    order?: unknown;
+    offset?: number;
+    limit?: number;
+    distinctOn?: string;
+    agg?: { aggregate?: AggregateSelectionInput; nodes?: readonly string[]; };
+    data?: unknown;
+    conflict?: ConflictSpec | false;
+}
+
+export class HasuraTableBuilder<
+    S extends GraphQLSchema,
+    T extends HasuraTableName<S>,
+    V,
+    Insert,
+    PK,
+    IsSingle extends boolean = false,
+    IsNullable extends boolean = false,
+    Result = IsSingle extends true ? IsNullable extends true ? V | null : V
+        : V[],
+> implements PromiseLike<Result> {
+    private readonly state: BuilderState;
+
+    constructor(state: BuilderState) {
+        this.state = state;
+    }
+
+    private next<
+        V2 = V,
+        S2 extends boolean = IsSingle,
+        N2 extends boolean = IsNullable,
+    >(patch: Partial<BuilderState>) {
+        return new HasuraTableBuilder<S, T, V2, Insert, PK, S2, N2>({
+            ...this.state,
+            ...patch,
+        });
+    }
+
+    private mergeWhere(condition: Record<string, unknown>) {
+        return { ...this.state.where, ...condition };
+    }
+
+    where(where: WhereInput<S, T>) {
+        return this.next({
+            where: this.mergeWhere(where as Record<string, unknown>),
+        });
+    }
+
+    eq<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>,
+    ) {
+        return this.next({
+            where: this.mergeWhere({ [field]: { _eq: value } }),
+        });
+    }
+
+    neq<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>,
+    ) {
+        return this.next({
+            where: this.mergeWhere({ [field]: { _neq: value } }),
+        });
+    }
+
+    in<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>[],
+    ) {
+        return this.next({
+            where: this.mergeWhere({ [field]: { _in: value } }),
+        });
+    }
+
+    nin<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>[],
+    ) {
+        return this.next({
+            where: this.mergeWhere({ [field]: { _nin: value } }),
+        });
+    }
+
+    gt<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>,
+        including: boolean = false,
+    ) {
+        const op = including ? "_gte" : "_gt";
+        return this.next({
+            where: this.mergeWhere({ [field]: { [op]: value } }),
+        });
+    }
+
+    lt<F extends TableColumn<S, T>>(
+        field: F,
+        value: NonNullable<TableRow<S, T>[F]>,
+        including: boolean = false,
+    ) {
+        const op = including ? "_lte" : "_lt";
+        return this.next({
+            where: this.mergeWhere({ [field]: { [op]: value } }),
+        });
+    }
+
+    like(
+        field: StringColumn<S, T>,
+        value: string,
+        caseSensitive: boolean = false,
+    ) {
+        const op = caseSensitive ? "_like" : "_ilike";
+        return this.next({
+            where: this.mergeWhere({ [field]: { [op]: value } }),
+        });
+    }
+
+    nlike(
+        field: StringColumn<S, T>,
+        value: string,
+        caseSensitive: boolean = false,
+    ) {
+        const op = caseSensitive ? "_nlike" : "_nilike";
+        return this.next({
+            where: this.mergeWhere({ [field]: { [op]: value } }),
+        });
+    }
+
+    isNull(field: TableColumn<S, T>, value: boolean) {
+        const existing = this.state.where?.[field];
+        return this.next({
+            where: this.mergeWhere({
+                [field]: {
+                    ...(typeof existing === "object" ? existing : undefined),
+                    _is_null: value,
+                },
+            }),
+        });
+    }
+
+    id(value: PK) {
+        if (this.state.primaryKey === null) {
+            throw new Error(
+                `${this.state.table} has no primary key configured`,
+            );
+        }
+        return this.next({
+            where: this.mergeWhere({
+                [this.state.primaryKey]: { _eq: value },
+            }),
+        });
+    }
+
+    order(order: OrderBy<S, T>) {
+        return this.next({ order });
+    }
+
+    offset(offset: number) {
+        return this.next({ offset });
+    }
+
+    limit(limit: number) {
+        return this.next({ limit });
+    }
+
+    distinctOn(column: TableColumn<S, T>) {
+        return this.next({ distinctOn: column });
+    }
+
+    select<G extends string>(
+        graph:
+            & G
+            & (ValidateSelection<G, S, T> extends true ? unknown
+                : never),
+    ) {
+        return this.next<GetSelectionType<G, S, T>>({ selection: graph });
+    }
+
+    customSelect<Custom extends object>(graph: string) {
+        return this.next<Custom>({ selection: graph });
+    }
+
+    all() {
+        return this.next<V, false, false>({ mode: "list" });
+    }
+
+    one() {
+        return this.next<V, true, true>({ mode: "single" });
+    }
+
+    insert(data: Insert | Insert[]) {
+        return this.next<V, false, false>({ mode: "insert", data });
+    }
+
+    onConflict(conflict: ConflictSpec | false) {
+        return this.next({ conflict });
+    }
+
+    update(data: Partial<Insert>) {
+        return this.next<{ affected_rows: number; }, true, false>({
+            mode: "update",
+            data,
+        });
+    }
+
+    remove() {
+        return this.next<{ affected_rows: number; }, true, false>({
+            mode: "remove",
+        });
+    }
+
+    aggregate<
+        const Agg extends {
+            aggregate?: TableAggregateInput<S, T>;
+            nodes?: NonEmptyArray<TableColumn<S, T>>;
+        },
+    >(agg: Agg) {
+        return this.next<AggregateResult<S, T, Agg>, true, false>({
+            mode: "aggregate",
+            agg: agg as BuilderState["agg"],
+        });
+    }
+
+    count() {
+        return this.aggregate({ aggregate: { count: true } });
+    }
+
+    subscribe(next: (data: Result) => void): () => void {
+        const subscribeFn = this.state.executor.subscribe;
+        if (!subscribeFn) {
+            throw new Error("executor.subscribe is not configured");
+        }
+        if (
+            this.state.mode === "insert" || this.state.mode === "update"
+            || this.state.mode === "remove"
+        ) {
+            throw new Error("subscribe() supports list and aggregate modes");
+        }
+        const request = this.buildRequest("subscription");
+        return subscribeFn(request, {
+            next: (data) => {
+                next(
+                    this.unwrap(
+                        extractResult(data, request.resultPath),
+                    ) as Result,
+                );
+            },
+        });
+    }
+
+    then<TResult1 = Result, TResult2 = never>(
+        onfulfilled?:
+            | ((value: Result) => TResult1 | PromiseLike<TResult1>)
+            | null,
+        onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
+    ): PromiseLike<TResult1 | TResult2> {
+        return this.run().then(onfulfilled, onrejected);
+    }
+
+    private async run(): Promise<Result> {
+        const request = this.buildRequest();
+        const data = await this.state.executor.execute(request);
+        return this.unwrap(extractResult(data, request.resultPath)) as Result;
+    }
+
+    private unwrap(payload: unknown): unknown {
+        switch (this.state.mode) {
+            case "single":
+                return Array.isArray(payload) ? payload[0] ?? null : null;
+            case "list":
+            case "insert":
+                return payload ?? [];
+            default:
+                return payload ?? null;
+        }
+    }
+
+    private requireSelection(): string {
+        if (this.state.selection === null) {
+            throw new Error(
+                `No selection for table "${this.state.table}": call `
+                    + "select()/customSelect() or configure defaultSelections",
+            );
+        }
+        return this.state.selection;
+    }
+
+    private buildRequest(
+        listKind: "query" | "subscription" = "query",
+    ): GraphQLRequest {
+        const state = this.state;
+        switch (state.mode) {
+            case "list":
+            case "single":
+                return buildListRequest({
+                    table: state.table,
+                    selection: this.requireSelection(),
+                    where: state.where,
+                    order: state.order,
+                    offset: state.offset,
+                    limit: state.mode === "single" ? 1 : state.limit,
+                    distinctOn: state.distinctOn,
+                    kind: listKind,
+                });
+            case "aggregate":
+                return buildAggregateRequest({
+                    table: state.table,
+                    aggregate: state.agg?.aggregate,
+                    nodes: state.agg?.nodes,
+                    where: state.where,
+                    order: state.order,
+                    distinctOn: state.distinctOn,
+                    kind: listKind,
+                });
+            case "insert":
+                return buildInsertRequest({
+                    table: state.table,
+                    selection: this.requireSelection(),
+                    data: state.data,
+                    conflict: state.conflict,
+                });
+            case "update":
+                if (state.where === undefined) {
+                    throw new Error("update() requires a where filter");
+                }
+                return buildUpdateRequest({
+                    table: state.table,
+                    where: state.where,
+                    data: state.data,
+                });
+            case "remove":
+                if (state.where === undefined) {
+                    throw new Error("remove() requires a where filter");
+                }
+                return buildDeleteRequest({
+                    table: state.table,
+                    where: state.where,
+                });
+        }
+    }
+}
