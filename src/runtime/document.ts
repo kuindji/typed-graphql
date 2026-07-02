@@ -27,7 +27,7 @@ export function buildOperationDocument(options: OperationOptions): string {
 }
 
 export function buildFieldArguments(
-    args: readonly { name: string; variable: string }[],
+    args: readonly { name: string; variable: string; }[],
 ): string {
     if (args.length === 0) {
         return "";
