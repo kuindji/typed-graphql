@@ -40,6 +40,18 @@ export type NoSelection = GraphQLError<
     "Call select()/customSelect() or configure a default selection for this table"
 >;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// _and/_or accept a single bool_exp or a list; normalize to a list so
+// repeated conditions can concatenate.
+function toConditionList(value: unknown): unknown[] {
+    return value === undefined ? []
+        : Array.isArray(value) ? value
+        : [ value ];
+}
+
 type BuilderMode =
     | "list"
     | "single"
@@ -92,27 +104,63 @@ export class HasuraTableBuilder<
         });
     }
 
+    /** Every where() call is a conjunct: repeated `_and` entries
+     * concatenate, disjoint column operators merge, and anything that
+     * cannot merge without changing meaning (repeated `_or`/`_not`, a
+     * colliding operator) is ANDed on via `_and` instead of overwriting
+     * the earlier condition. */
     private mergeWhere(condition: Record<string, unknown>) {
-        return { ...this.state.where, ...condition };
+        const existing = this.state.where;
+        if (existing === undefined) {
+            return { ...condition };
+        }
+        const merged: Record<string, unknown> = { ...existing };
+        const conjuncts: Record<string, unknown>[] = [];
+        for (const [ key, value ] of Object.entries(condition)) {
+            if (!(key in merged)) {
+                merged[key] = value;
+                continue;
+            }
+            const current = merged[key];
+            if (key === "_and") {
+                merged[key] = [
+                    ...toConditionList(current),
+                    ...toConditionList(value),
+                ];
+            } else if (
+                key !== "_or" && key !== "_not"
+                && isPlainObject(current) && isPlainObject(value)
+                && Object.keys(value).every((op) => !(op in current))
+            ) {
+                merged[key] = { ...current, ...value };
+            } else {
+                conjuncts.push({ [key]: value });
+            }
+        }
+        if (conjuncts.length > 0) {
+            merged["_and"] = [ ...toConditionList(merged["_and"]), ...conjuncts ];
+        }
+        return merged;
     }
 
     /** Merges operators into an existing column entry instead of replacing
      * the whole column, so chaining filters on the same column (e.g.
      * `.gt("age", 18).lt("age", 65)`) accumulates operators rather than
-     * silently dropping earlier ones. */
+     * silently dropping earlier ones. Later operators intentionally replace
+     * earlier ones of the same name, so the column is written back directly
+     * rather than through mergeWhere's collision handling. */
     private mergeFieldOperator(
         field: string,
         operators: Record<string, unknown>,
     ) {
         const existing = this.state.where?.[field];
-        return this.mergeWhere({
+        return {
+            ...this.state.where,
             [field]: {
-                ...(existing !== null && typeof existing === "object"
-                    ? existing
-                    : undefined),
+                ...(isPlainObject(existing) ? existing : undefined),
                 ...operators,
             },
-        });
+        };
     }
 
     where(where: WhereInput<S, T>) {

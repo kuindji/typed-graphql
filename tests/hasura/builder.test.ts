@@ -66,6 +66,51 @@ test("chaining filters on the same column merges operators instead of dropping t
     });
 });
 
+test("where() conjoins repeated logical and column filters instead of overwriting", async () => {
+    const andMerge = createMockExecutor({ User: [] });
+    await userBuilder(andMerge.executor)
+        .where({ _and: [ { active: { _eq: true } } ] })
+        .where({ _and: [ { age: { _gt: 18 } } ] });
+    expect(andMerge.requests[0]!.variables.where).toEqual({
+        _and: [ { active: { _eq: true } }, { age: { _gt: 18 } } ],
+    });
+
+    const opMerge = createMockExecutor({ User: [] });
+    await userBuilder(opMerge.executor)
+        .gt("age", 18)
+        .where({ age: { _lt: 65 } });
+    expect(opMerge.requests[0]!.variables.where).toEqual({
+        age: { _gt: 18, _lt: 65 },
+    });
+
+    const orMerge = createMockExecutor({ User: [] });
+    await userBuilder(orMerge.executor)
+        .where({ _or: [ { active: { _eq: true } } ] })
+        .where({ _or: [ { age: { _gt: 65 } } ] });
+    expect(orMerge.requests[0]!.variables.where).toEqual({
+        _or: [ { active: { _eq: true } } ],
+        _and: [ { _or: [ { age: { _gt: 65 } } ] } ],
+    });
+
+    const opConflict = createMockExecutor({ User: [] });
+    await userBuilder(opConflict.executor)
+        .where({ age: { _gt: 18 } })
+        .where({ age: { _gt: 21 } });
+    expect(opConflict.requests[0]!.variables.where).toEqual({
+        age: { _gt: 18 },
+        _and: [ { age: { _gt: 21 } } ],
+    });
+
+    const notMerge = createMockExecutor({ User: [] });
+    await userBuilder(notMerge.executor)
+        .where({ _not: { active: { _eq: true } } })
+        .where({ _not: { age: { _gt: 65 } } });
+    expect(notMerge.requests[0]!.variables.where).toEqual({
+        _not: { active: { _eq: true } },
+        _and: [ { _not: { age: { _gt: 65 } } } ],
+    });
+});
+
 test("one() forces limit 1 and resolves the first row or null", async () => {
     const row = { id: "u1" as UserId, email: null };
     const mock = createMockExecutor({ User: [ row ] });
