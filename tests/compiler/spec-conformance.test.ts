@@ -171,6 +171,33 @@ test("field conflicts compare string arguments by exact content", () => {
     >().toEqualTypeOf<true>();
 });
 
+test("field conflicts compare argument lists structurally", () => {
+    expectTypeOf<
+        IsValidGraphQL<
+            '{ same: echo(text: "a", count: 1) same: echo(count: 1, text: "a") }',
+            Schema
+        >
+    >().toEqualTypeOf<true>();
+
+    expectTypeOf<
+        IsValidGraphQL<
+            "query Q($id: ID!) { user(id: $id # key\n) { id } user(id: $id) { id } }",
+            Schema
+        >
+    >().toEqualTypeOf<true>();
+
+    expectTypeOf<
+        ValidateGraphQL<'{ same: echo(text: "a") same: echo(text: "b") }', Schema>
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            '{ same: echo(text: "a", count: 1) same: echo(text: "a", count: 2) }',
+            Schema
+        >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+});
+
 test("int literals coerce to ID but not to String", () => {
     expectTypeOf<ValidateGraphQL<"{ echo(text: 123) }", Schema>>()
         .toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();

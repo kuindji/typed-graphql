@@ -375,6 +375,45 @@ test("conflicting duplicate response keys are rejected", () => {
     >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
 });
 
+test("duplicate selections of the same field merge their sub-selections", () => {
+    type Dup =
+        "query Q($id: ID!) { user(id: $id) { id } user(id: $id) { name } }";
+
+    expectTypeOf<IsValidGraphQL<Dup, Schema>>().toEqualTypeOf<true>();
+    expectTypeOf<GetReturnType<Dup, Schema>>().toEqualTypeOf<{
+        user: { id: string; name: string | null } | null;
+    }>();
+
+    type Nested =
+        "query Q($id: ID!) { user(id: $id) { posts { a: id } } user(id: $id) { posts { b: id } } }";
+
+    expectTypeOf<IsValidGraphQL<Nested, Schema>>().toEqualTypeOf<true>();
+    expectTypeOf<GetReturnType<Nested, Schema>>().toEqualTypeOf<{
+        user: { posts: { a: string; b: string }[] } | null;
+    }>();
+
+    type ViaFragment =
+        "query Q($id: ID!) { user(id: $id) { id } ...Extra } fragment Extra on Query { user(id: $id) { name } }";
+
+    expectTypeOf<GetReturnType<ViaFragment, Schema>>().toEqualTypeOf<{
+        user: { id: string; name: string | null } | null;
+    }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            "query Q($id: ID!) { user(id: $id) { same: id } user(id: $id) { same: name } }",
+            Schema
+        >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+
+    expectTypeOf<
+        ValidateGraphQL<
+            "query Q($a: ID!, $b: ID!) { user(id: $a) { id } user(id: $b) { id } }",
+            Schema
+        >
+    >().toMatchTypeOf<{ code: "FIELD_CONFLICT"; }>();
+});
+
 test("multi-operation documents require an operation name", () => {
     expectTypeOf<
         IsValidGraphQL<"query A { version } query B { version }", Schema>

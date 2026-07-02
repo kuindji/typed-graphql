@@ -6,6 +6,7 @@ import type {
     InputApplicationType,
 } from "../schema.js";
 import type {
+    Compact,
     Match,
     SkipIgnored,
     TakeBraced,
@@ -506,6 +507,95 @@ export type ValidateArguments<
 
 export type ArgumentUses<T> =
     T extends ArgumentsSuccess<infer Uses> ? Uses : never;
+
+type SameLiteral<A, B> =
+    [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+interface ArgumentEntry<Name extends string, Value> {
+    name: Name;
+    value: Value;
+}
+
+interface InvalidFingerprint {
+    __invalidArgumentFingerprint: true;
+}
+
+type NumberTokenChar = Digit | "." | "-" | "+" | "e" | "E";
+
+// TakeValue erases the source text of numeric literals, so field-conflict
+// fingerprints capture the raw token instead.
+type TakeNumberToken<S extends string, Acc extends string = ""> =
+    S extends `${infer C}${infer Rest}`
+        ? C extends NumberTokenChar
+            ? TakeNumberToken<Rest, `${Acc}${C}`>
+            : Match<Acc, S>
+        : Match<Acc, "">;
+
+// List and object literal bodies are compared as compacted source, so
+// whitespace and comments cannot force a conflict but ordering inside a
+// nested literal still can.
+type CanonicalizeValue<V> =
+    V extends LiteralValue<infer Kind extends string, infer Source extends string>
+        ? Kind extends "list" | "object"
+            ? LiteralValue<Kind, Compact<Source>>
+            : V
+        : V;
+
+type TakeCanonicalValue<S extends string> =
+    SkipIgnored<S> extends `${infer First}${string}`
+        ? First extends Digit | "-"
+            ? TakeNumberToken<SkipIgnored<S>> extends Match<
+                infer Raw extends string,
+                infer Rest extends string
+            >
+                ? Match<LiteralValue<"number", Raw>, Rest>
+                : never
+            : TakeValue<S> extends Match<infer Value, infer Rest extends string>
+                ? Match<CanonicalizeValue<Value>, Rest>
+                : InvalidFingerprint
+        : InvalidFingerprint;
+
+// The set of `name: value` entries in an argument list; unordered because it
+// accumulates as a union, per spec §5.3.2 ("identical sets of arguments").
+type ArgumentFingerprint<
+    S extends string,
+    Acc = never,
+    Steps extends unknown[] = [],
+> = Steps["length"] extends 64
+    ? InvalidFingerprint
+    : SkipIgnored<S> extends "" ? Acc
+    : TakeName<S> extends Match<
+        infer Name extends string,
+        infer AfterName extends string
+    >
+        ? SkipIgnored<AfterName> extends `:${infer AfterColon}`
+            ? TakeCanonicalValue<AfterColon> extends Match<
+                infer Value,
+                infer Rest extends string
+            >
+                ? ArgumentFingerprint<
+                    Rest,
+                    Acc | ArgumentEntry<Name, Value>,
+                    [unknown, ...Steps]
+                >
+                : InvalidFingerprint
+            : InvalidFingerprint
+        : InvalidFingerprint;
+
+// Spec §5.3.2: fields merge only with identical argument sets. Textual
+// comparison first (cheap, covers the overwhelmingly common case), then a
+// structural fingerprint so argument order and comments cannot force a
+// FIELD_CONFLICT. An unparsable list never fingerprints equal.
+export type SameArguments<A extends string, B extends string> =
+    SameLiteral<A, B> extends true ? true
+    : SameLiteral<Compact<A>, Compact<B>> extends true ? true
+    : ArgumentFingerprint<A> extends infer FA
+        ? [FA] extends [InvalidFingerprint] ? false
+        : ArgumentFingerprint<B> extends infer FB
+            ? [FB] extends [InvalidFingerprint] ? false
+            : SameLiteral<FA, FB>
+            : never
+        : never;
 
 export type VariableApplicationType<Use> =
     Use extends VariableUse<string, infer Input> ? InputApplicationType<Input> : never;

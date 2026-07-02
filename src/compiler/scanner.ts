@@ -107,8 +107,18 @@ export type TakeString<S extends string> =
     : SkipIgnored<S> extends `"${infer Rest}` ? DriveString<TakeStringBody<Rest>>
     : GraphQLError<"UNEXPECTED_TOKEN", "expected string literal">;
 
+// Comments are handled before whitespace: stripping the line terminator
+// first would fuse a comment with the source that follows it.
 type CompactPlain<S extends string> =
-    S extends `${infer A} ${infer B}` ? CompactPlain<`${A}${B}`>
+    S extends `${infer A}#${infer C}`
+        ? C extends `${infer Comment}\n${infer B}`
+            ? Comment extends `${string}\r${infer AfterCr}`
+                ? CompactPlain<`${A}${AfterCr}\n${B}`>
+                : CompactPlain<`${A}${B}`>
+            : C extends `${string}\r${infer B}`
+                ? CompactPlain<`${A}${B}`>
+                : CompactPlain<A>
+    : S extends `${infer A} ${infer B}` ? CompactPlain<`${A}${B}`>
     : S extends `${infer A}\n${infer B}` ? CompactPlain<`${A}${B}`>
     : S extends `${infer A}\r${infer B}` ? CompactPlain<`${A}${B}`>
     : S extends `${infer A}\t${infer B}` ? CompactPlain<`${A}${B}`>
@@ -122,8 +132,9 @@ type TakeQuotedBody<S extends string, Acc extends string = ""> =
             : Match<`${Acc}${Body}`, Rest>
         : Match<`${Acc}${S}`, "">;
 
-// Strips ignored tokens outside string literals only, so string arguments
-// keep their exact content when compared for field conflicts.
+// Strips ignored tokens (whitespace, commas, comments) outside string
+// literals only, so string arguments keep their exact content when compared
+// for field conflicts.
 export type Compact<S extends string> =
     S extends `${infer Before}"${infer After}`
         ? After extends `""${infer BlockRest}`

@@ -4,11 +4,14 @@ import type {
     GraphQLRelation,
     GraphQLSchema,
 } from "../schema.js";
-import type { ArgumentUses, ValidateArguments } from "./arguments.js";
+import type {
+    ArgumentUses,
+    SameArguments,
+    ValidateArguments,
+} from "./arguments.js";
 import type { DirectivesResult, TakeDirectives } from "./directives.js";
 import type { FragmentEntry } from "./document.js";
 import type {
-    Compact,
     Match,
     SkipIgnored,
     TakeBraced,
@@ -229,7 +232,22 @@ type FieldKey<Alias extends string | undefined, Name extends string> =
 type SameType<A, B> =
     [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-type FieldConflict<Left, Right> =
+// Object-field results carry their raw nested field union instead of an
+// eagerly materialized shape, so duplicate selections of the same field can
+// merge their sub-selections (spec §5.3.2) at materialization time.
+interface ObjectFieldValue<
+    Fields = unknown,
+    Relation extends GraphQLRelation = GraphQLRelation,
+> {
+    __objectFieldValue: true;
+    fields: Fields;
+    relation: Relation;
+}
+
+// Same response key with an overlapping type condition: per spec §5.3.2 the
+// two selections must merge, so a differing sub-selection recurses into a
+// conflict check of the combined nested fields instead of being an error.
+type FieldConflict<Left, Right, Depth extends unknown[] = []> =
     Left extends FieldResult<
         infer Key,
         infer Value,
@@ -250,16 +268,33 @@ type FieldConflict<Left, Right> =
         >
             ? [Extract<Condition, OtherCondition>] extends [never] ? never
             : SameType<FieldName, OtherFieldName> extends true
-                ? SameType<Compact<Args>, Compact<OtherArgs>> extends true
+                ? SameArguments<Args, OtherArgs> extends true
                     ? SameType<Value, OtherValue> extends true ? never
-                    : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
+                    : Value extends ObjectFieldValue<infer LeftFields, GraphQLRelation>
+                        ? OtherValue extends ObjectFieldValue<
+                            infer RightFields,
+                            GraphQLRelation
+                        >
+                            ? FieldConflicts<
+                                LeftFields | RightFields,
+                                LeftFields | RightFields,
+                                [unknown, ...Depth]
+                            >
+                            : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
+                        : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
                 : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
                 : GraphQLError<"FIELD_CONFLICT", `conflicting field: ${Key}`>
             : never
         : never;
 
-type FieldConflicts<Fields, All = Fields> =
-    Fields extends unknown ? FieldConflict<Fields, All> : never;
+type FieldConflicts<Fields, All = Fields, Depth extends unknown[] = []> =
+    Depth["length"] extends 16
+        ? GraphQLError<
+            "QUERY_TOO_COMPLEX",
+            "field merge nesting exceeds compiler depth budget"
+        >
+        : Fields extends unknown ? FieldConflict<Fields, All, Depth>
+        : never;
 
 type FragmentApplies<
     S extends GraphQLSchema,
@@ -384,10 +419,7 @@ type CompileField<
                                                 Fragments,
                                                 Fields | FieldResult<
                                                     FieldKey<Head["alias"], Head["name"]>,
-                                                    WrapRelation<
-                                                        MaterializeFields<NestedFields>,
-                                                        Relation
-                                                    >,
+                                                    ObjectFieldValue<NestedFields, Relation>,
                                                     Optional,
                                                     Uses | DirectiveUses | NestedUses,
                                                     Head["name"],
@@ -694,8 +726,43 @@ type RunSelection<
 type FieldKeys<Fields> =
     Fields extends FieldResult<infer Key, unknown, boolean, unknown> ? Key : never;
 
-type FieldValue<Fields, Key extends string> =
-    Fields extends FieldResult<Key, infer Value, boolean, unknown> ? Value : never;
+// All carriers for the same response key and the same type condition merge
+// into one object shape (spec §5.3.2 CollectFields); occurrences under
+// different conditions stay separate union members.
+type MergedNestedFields<All, Key extends string, Condition> =
+    All extends FieldResult<
+        Key,
+        infer Value,
+        boolean,
+        unknown,
+        string,
+        string,
+        infer OtherCondition
+    >
+        ? SameType<Condition, OtherCondition> extends true
+            ? Value extends ObjectFieldValue<infer Nested, GraphQLRelation>
+                ? Nested
+                : never
+            : never
+        : never;
+
+type FieldValue<Fields, Key extends string, All = Fields> =
+    Fields extends FieldResult<
+        Key,
+        infer Value,
+        boolean,
+        unknown,
+        string,
+        string,
+        infer Condition
+    >
+        ? Value extends ObjectFieldValue<unknown, infer Relation>
+            ? WrapRelation<
+                MaterializeFields<MergedNestedFields<All, Key, Condition>>,
+                Relation
+            >
+            : Value
+        : never;
 
 type FieldUses<Fields> =
     Fields extends FieldResult<string, unknown, boolean, infer Uses> ? Uses
