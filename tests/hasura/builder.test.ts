@@ -323,6 +323,20 @@ test("subscribe() without executor.subscribe throws", () => {
     );
 });
 
+test("isAggregate() reflects the builder mode across the chain", () => {
+    const mock = createMockExecutor(null);
+    const b = userBuilder(mock.executor);
+    expect(b.select("id").all().isAggregate()).toBe(false); // list
+    expect(b.select("id").one().isAggregate()).toBe(false); // single
+    expect(b.aggregate({ aggregate: { count: true } }).isAggregate()).toBe(
+        true,
+    );
+    expect(b.count().isAggregate()).toBe(true);
+    expect(b.count().where({ active: { _eq: false } }).isAggregate()).toBe(
+        true,
+    ); // rides the chain
+});
+
 test("builders are immutable — chaining never mutates the source", async () => {
     const mock = createMockExecutor({ User: [] });
     const base = userBuilder(mock.executor);

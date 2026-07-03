@@ -4,7 +4,8 @@
 // injected executor. Deviations from TheFloorr are documented in
 // docs/superpowers/specs/2026-07-02-phase3-runtime-construction-design.md:
 // one() sets limit 1, update/remove require a where filter, subscriptions
-// always emit subscription documents, and there is no self()/isAggregate().
+// always emit subscription documents, and there is no self() (awaiting the
+// builder directly covers it, since it is PromiseLike).
 
 import type { GraphQLError } from "../diagnostics.js";
 import type { GetSelectionType, ValidateSelection } from "../index.js";
@@ -360,6 +361,13 @@ export class HasuraTableBuilder<
 
     count() {
         return this.aggregate({ aggregate: { count: true } });
+    }
+
+    /** True when this builder targets an aggregate query (mode "aggregate").
+     * Lets a consumer branch on query shape — e.g. seed an empty aggregate
+     * object vs an empty list before the first result arrives. */
+    isAggregate(): boolean {
+        return this.state.mode === "aggregate";
     }
 
     subscribe(
