@@ -387,6 +387,20 @@ export class HasuraTableBuilder<
         const request = this.buildRequest("subscription");
         return subscribeFn(request, {
             next: (data) => {
+                // Partial/errored frames can carry root data WITHOUT the
+                // subscribed field. Unwrapping those would fabricate an
+                // empty result (or throw, for aggregates) and clobber the
+                // caller's last good payload — deliver only frames that
+                // actually contain the field.
+                const rootKey = request.resultPath?.[0];
+                if (
+                    data === null || data === undefined
+                    || typeof data !== "object"
+                    || (rootKey !== undefined
+                        && !(rootKey in (data as Record<string, unknown>)))
+                ) {
+                    return;
+                }
                 next(
                     this.unwrap(
                         extractResult(data, request.resultPath),
@@ -423,12 +437,14 @@ export class HasuraTableBuilder<
                     ? payload[0] ?? null
                     : payload ?? null;
             case "list":
-            case "insert":
                 return payload ?? [];
             default:
-                // aggregate/update/remove results are typed non-null;
-                // returning null here would surface as a TypeError at the
-                // caller's .affected_rows/.aggregate access, so fail loudly.
+                // insert/aggregate/update/remove results are typed non-null.
+                // For insert, a missing returning list means the mutation did
+                // NOT run (errored response) — resolving [] would read as
+                // success-with-zero-rows; for the others, returning null
+                // would surface as a TypeError at the caller's
+                // .affected_rows/.aggregate access. Fail loudly for all.
                 if (payload === null || payload === undefined) {
                     throw new Error(
                         `${this.state.mode} on table "${this.state.table}" `

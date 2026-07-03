@@ -227,6 +227,25 @@ test("null mutation and aggregate payloads reject instead of resolving null", as
         .rejects.toThrow('aggregate on table "User" returned no payload');
 });
 
+test("a missing insert payload rejects instead of resolving an empty list", async () => {
+    // A failed insert (GraphQL error, no insert_<T>.returning in the response)
+    // must not look like success-with-zero-rows to the caller.
+    const nullRoot = createMockExecutor(null);
+    await expect(
+        Promise.resolve(
+            userBuilder(nullRoot.executor).insert({ id: "u1" as UserId }),
+        ),
+    ).rejects.toThrow('insert on table "User" returned no payload');
+
+    // Same when the mutation field is present but `returning` is absent.
+    const noReturning = createMockExecutor({ insert_User: {} });
+    await expect(
+        Promise.resolve(
+            userBuilder(noReturning.executor).insert({ id: "u1" as UserId }),
+        ),
+    ).rejects.toThrow('insert on table "User" returned no payload');
+});
+
 test("count() resolves the aggregate count object", async () => {
     const mock = createMockExecutor({
         User_aggregate: { aggregate: { count: 7 } },
@@ -303,6 +322,32 @@ test("subscribe() with an aggregate emits a subscription document", () => {
     expect(mock.requests[0]!.document).toBe(
         "subscription AggregateUser { User_aggregate { aggregate { count } } }",
     );
+});
+
+test("subscribe() skips frames that lack the subscribed field", () => {
+    // A partial/errored execution frame may carry root data without the
+    // subscribed field. Delivering it would fabricate an empty result and
+    // overwrite good client state — skip it and keep the last good payload.
+    const mock = createMockExecutor();
+    const seen: unknown[] = [];
+    userBuilder(mock.executor)
+        .eq("active", true)
+        .subscribe((rows) => seen.push(rows));
+    mock.emit({ User: [ { id: "u1", email: null } ] }); // good frame
+    mock.emit({}); // errored frame without the field — skipped
+    mock.emit({ Other: [] }); // unrelated field only — skipped
+    mock.emit(null); // null root data — skipped
+    mock.emit({ User: [] }); // genuine empty list — delivered
+    expect(seen).toEqual([ [ { id: "u1", email: null } ], [] ]);
+});
+
+test("subscribe() on an aggregate skips frames missing the aggregate field instead of throwing", () => {
+    const mock = createMockExecutor();
+    const seen: unknown[] = [];
+    userBuilder(mock.executor).count().subscribe((agg) => seen.push(agg));
+    mock.emit({}); // must not throw "returned no payload" inside next()
+    mock.emit({ User_aggregate: { aggregate: { count: 2 } } });
+    expect(seen).toEqual([ { aggregate: { count: 2 } } ]);
 });
 
 test("subscribe() forwards executor errors to the optional error callback", () => {
