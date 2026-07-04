@@ -211,39 +211,33 @@ test("an empty where filter does not bypass the update/remove guard", async () =
     expect(mock.requests).toEqual([]);
 });
 
-test("null mutation and aggregate payloads reject instead of resolving null", async () => {
+test("null mutation and aggregate payloads resolve null instead of throwing", async () => {
     const mock = createMockExecutor(null);
-    await expect(
-        Promise.resolve(
-            userBuilder(mock.executor).eq("active", false).update({
-                email: null,
-            }),
-        ),
-    ).rejects.toThrow('update on table "User" returned no payload');
-    await expect(
-        Promise.resolve(userBuilder(mock.executor).eq("active", false).remove()),
-    ).rejects.toThrow('remove on table "User" returned no payload');
-    await expect(Promise.resolve(userBuilder(mock.executor).count()))
-        .rejects.toThrow('aggregate on table "User" returned no payload');
+    expect(
+        await userBuilder(mock.executor).eq("active", false).update({
+            email: null,
+        }),
+    ).toBeNull();
+    expect(
+        await userBuilder(mock.executor).eq("active", false).remove(),
+    ).toBeNull();
+    expect(await userBuilder(mock.executor).count()).toBeNull();
 });
 
-test("a missing insert payload rejects instead of resolving an empty list", async () => {
-    // A failed insert (GraphQL error, no insert_<T>.returning in the response)
-    // must not look like success-with-zero-rows to the caller.
+test("a missing insert payload resolves an empty list instead of throwing", async () => {
+    // A failed insert (GraphQL error, no insert_<T>.returning in the
+    // response) resolves [] and lets the consumer decide; the error already
+    // surfaced through the executor's onError path.
     const nullRoot = createMockExecutor(null);
-    await expect(
-        Promise.resolve(
-            userBuilder(nullRoot.executor).insert({ id: "u1" as UserId }),
-        ),
-    ).rejects.toThrow('insert on table "User" returned no payload');
+    expect(
+        await userBuilder(nullRoot.executor).insert({ id: "u1" as UserId }),
+    ).toEqual([]);
 
     // Same when the mutation field is present but `returning` is absent.
     const noReturning = createMockExecutor({ insert_User: {} });
-    await expect(
-        Promise.resolve(
-            userBuilder(noReturning.executor).insert({ id: "u1" as UserId }),
-        ),
-    ).rejects.toThrow('insert on table "User" returned no payload');
+    expect(
+        await userBuilder(noReturning.executor).insert({ id: "u1" as UserId }),
+    ).toEqual([]);
 });
 
 test("count() resolves the aggregate count object", async () => {

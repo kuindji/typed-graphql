@@ -439,19 +439,14 @@ export class HasuraTableBuilder<
             case "list":
                 return payload ?? [];
             default:
-                // insert/aggregate/update/remove results are typed non-null.
-                // For insert, a missing returning list means the mutation did
-                // NOT run (errored response) — resolving [] would read as
-                // success-with-zero-rows; for the others, returning null
-                // would surface as a TypeError at the caller's
-                // .affected_rows/.aggregate access. Fail loudly for all.
-                if (payload === null || payload === undefined) {
-                    throw new Error(
-                        `${this.state.mode} on table "${this.state.table}" `
-                            + "returned no payload",
-                    );
-                }
-                return payload;
+                // Never throw on a missing payload. An errored/partial
+                // response already surfaced through the executor's onError
+                // path; resolve to the mode's empty value and let the consumer
+                // decide. insert returns a list (V[]); update/remove/aggregate
+                // a single object (null on failure).
+                return this.state.mode === "insert"
+                    ? (payload ?? [])
+                    : (payload ?? null);
         }
     }
 

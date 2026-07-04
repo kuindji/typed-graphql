@@ -24,9 +24,11 @@ export interface GraphQLObserver {
 
 export interface GraphQLExecutor {
     /** Resolves with the root `data` object of the GraphQL response.
-     *  Executors are expected to surface the response `errors` list as a
-     *  rejection instead of returning partial data silently —
-     *  `unwrapResponse` does exactly that for a standard envelope. */
+     *  An executor MAY reject on a genuine transport failure, but a GraphQL
+     *  response error is expected to be reported out-of-band and resolved as
+     *  its (possibly null) data — the builder resolves a missing payload to
+     *  the mode's empty value rather than throwing. `unwrapResponse` remains
+     *  an opt-in strict helper that rejects on a non-empty `errors` list. */
     execute: (request: GraphQLRequest) => Promise<unknown>;
     /** Required only when subscriptions are used. Returns unsubscribe. */
     subscribe?: (
