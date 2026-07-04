@@ -40,14 +40,17 @@ export type TestSchema = {
     };
 };
 
-export function createMockExecutor(result: unknown = null) {
+export function createMockExecutor(result: unknown = null, error?: unknown) {
     const requests: GraphQLRequest[] = [];
     const observers: GraphQLObserver[] = [];
     let unsubscribed = false;
     const executor: GraphQLExecutor = {
+        // Executors resolve the { data, error } envelope: root data plus the
+        // response error, if any (reported by the executor, surfaced to
+        // call-sites through builder.response()).
         execute: async (request) => {
             requests.push(request);
-            return result;
+            return { data: result, error };
         },
         subscribe: (request, observer) => {
             requests.push(request);

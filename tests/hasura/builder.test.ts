@@ -356,7 +356,7 @@ test("subscribe() forwards executor errors to the optional error callback", () =
 });
 
 test("subscribe() without executor.subscribe throws", () => {
-    const bare: GraphQLExecutor = { execute: async () => null };
+    const bare: GraphQLExecutor = { execute: async () => ({ data: null }) };
     expect(() => userBuilder(bare).subscribe(() => {})).toThrow(
         "executor.subscribe is not configured",
     );
@@ -383,4 +383,26 @@ test("builders are immutable — chaining never mutates the source", async () =>
     expect(filtered).not.toBe(base);
     await base;
     expect(mock.requests[0]!.variables).toEqual({});
+});
+
+test("response() resolves the unwrapped payload AND the executor's error", async () => {
+    const boom = new Error("permission denied");
+    const mock = createMockExecutor(null, boom);
+    const { data, error } = await userBuilder(mock.executor).response();
+    expect(data).toEqual([]); // list mode unwraps a null payload to []
+    expect(error).toBe(boom);
+});
+
+test("response() resolves error: null when the executor reports none", async () => {
+    const row = { id: "u1" as UserId, email: null };
+    const mock = createMockExecutor({ User: [ row ] });
+    const { data, error } = await userBuilder(mock.executor).response();
+    expect(data).toEqual([ row ]);
+    expect(error).toBeNull();
+});
+
+test("plain await ignores the executor's error and resolves the payload alone", async () => {
+    const mock = createMockExecutor({ User: [] }, new Error("logged upstream"));
+    const result = await userBuilder(mock.executor);
+    expect(result).toEqual([]);
 });

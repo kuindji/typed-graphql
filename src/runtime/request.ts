@@ -22,14 +22,29 @@ export interface GraphQLObserver {
     error?: (error: unknown) => void;
 }
 
+/** What an executor resolves with: the root `data` object of the GraphQL
+ *  response plus the response error, if any. The builder unwraps `data` for
+ *  the plain awaited path and hands both through `response()` so call-sites
+ *  can distinguish a failed operation from a legitimately empty result. */
+export interface GraphQLExecuteResult {
+    /** Root `data` object of the GraphQL response (null when absent). */
+    data: unknown;
+    /** The GraphQL response error, if the response carried one. Reporting
+     *  (logging/Sentry) is the executor's job; this field only lets the
+     *  call-site branch on failure. */
+    error?: unknown;
+}
+
 export interface GraphQLExecutor {
-    /** Resolves with the root `data` object of the GraphQL response.
-     *  An executor MAY reject on a genuine transport failure, but a GraphQL
-     *  response error is expected to be reported out-of-band and resolved as
-     *  its (possibly null) data — the builder resolves a missing payload to
-     *  the mode's empty value rather than throwing. `unwrapResponse` remains
-     *  an opt-in strict helper that rejects on a non-empty `errors` list. */
-    execute: (request: GraphQLRequest) => Promise<unknown>;
+    /** Resolves with the root `data` object of the GraphQL response and the
+     *  response error, if any. An executor MAY reject on a genuine transport
+     *  failure, but a GraphQL response error is expected to be reported
+     *  out-of-band (the executor owns logging) and RESOLVED as
+     *  `{ data, error }` — the builder resolves a missing payload to the
+     *  mode's empty value rather than throwing, and surfaces `error` through
+     *  `response()`. `unwrapResponse` remains an opt-in strict helper that
+     *  rejects on a non-empty `errors` list. */
+    execute: (request: GraphQLRequest) => Promise<GraphQLExecuteResult>;
     /** Required only when subscriptions are used. Returns unsubscribe. */
     subscribe?: (
         request: GraphQLRequest,
@@ -80,7 +95,8 @@ export function extractErrors(
 
 /** Unwrap a standard GraphQL response envelope into its root `data`,
  *  throwing GraphQLResponseError when the response carries errors. Meant
- *  for executors: `execute: async (req) => unwrapResponse(await post(req))`.
+ *  for strict executors that WANT response errors to reject:
+ *  `execute: async (req) => ({ data: unwrapResponse(await post(req)) })`.
  *  A value that is not an envelope at all throws a plain Error instead of
  *  being silently treated as empty data. */
 export function unwrapResponse(response: unknown): unknown {

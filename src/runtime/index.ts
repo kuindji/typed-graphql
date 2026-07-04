@@ -4,6 +4,7 @@
 export type { OperationOptions, VariableDefinition } from "./document.js";
 export { buildFieldArguments, buildOperationDocument } from "./document.js";
 export type {
+    GraphQLExecuteResult,
     GraphQLExecutor,
     GraphQLObserver,
     GraphQLRequest,

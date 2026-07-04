@@ -422,10 +422,25 @@ export class HasuraTableBuilder<
         return this.run().then(onfulfilled, onrejected);
     }
 
-    private async run(): Promise<Result> {
+    /** Run the operation and resolve BOTH the unwrapped payload and the
+     *  GraphQL response error, if any. The plain awaited path (`then`)
+     *  resolves the payload alone and cannot distinguish a failed operation
+     *  from an empty result — call-sites that need to branch on failure opt
+     *  into this accessor. The executor owns error reporting; `error` here
+     *  is purely for the call-site's decision. */
+    async response(): Promise<{ data: Result; error: unknown; }> {
         const request = this.buildRequest();
-        const data = await this.state.executor.execute(request);
-        return this.unwrap(extractResult(data, request.resultPath)) as Result;
+        const result = await this.state.executor.execute(request);
+        return {
+            data: this.unwrap(
+                extractResult(result.data, request.resultPath),
+            ) as Result,
+            error: result.error ?? null,
+        };
+    }
+
+    private async run(): Promise<Result> {
+        return (await this.response()).data;
     }
 
     private unwrap(payload: unknown): unknown {

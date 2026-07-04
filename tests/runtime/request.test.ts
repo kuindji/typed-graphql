@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { expectTypeOf } from "expect-type";
 
 import type {
+    GraphQLExecuteResult,
     GraphQLExecutor,
     GraphQLRequest,
 } from "../../src/runtime/request.js";
@@ -81,7 +82,7 @@ test("request and executor types have the documented shape", () => {
         Record<string, unknown>
     >();
     expectTypeOf<GraphQLExecutor["execute"]>().toEqualTypeOf<
-        (request: GraphQLRequest) => Promise<unknown>
+        (request: GraphQLRequest) => Promise<GraphQLExecuteResult>
     >();
     expectTypeOf<NonNullable<GraphQLExecutor["subscribe"]>>().returns
         .toEqualTypeOf<() => void>();
