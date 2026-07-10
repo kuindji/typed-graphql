@@ -67,6 +67,8 @@ export type GetSelectionType<
     Schema extends GraphQLSchema,
     Root extends string,
 > = CompileSelection<Selection, Schema, Root> extends SelectionSuccess<
-    infer Result
+    infer Result,
+    unknown,
+    unknown
 > ? Result
     : never;

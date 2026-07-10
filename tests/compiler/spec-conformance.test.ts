@@ -383,6 +383,31 @@ test("a subscription must select exactly one root field", () => {
         >
     >().toEqualTypeOf<true>();
 
+    expectTypeOf<ValidateGraphQL<"subscription S { __typename }", SubSchema>>()
+        .toMatchTypeOf<{ code: "SUBSCRIPTION_INTROSPECTION_ROOT"; }>();
+
+    expectTypeOf<
+        IsValidGraphQL<
+            "subscription S { tick @include(if: true) }",
+            SubSchema
+        >
+    >().toEqualTypeOf<true>();
+    expectTypeOf<
+        GetReturnType<
+            "subscription S { tick @include(if: true) }",
+            SubSchema
+        >
+    >().toEqualTypeOf<{ tick: string; }>();
+
+    type ConditionalFragmentSubscription =
+        "subscription S($show: Boolean!) { ...F @include(if: $show) } fragment F on Subscription { tick }";
+    expectTypeOf<
+        IsValidGraphQL<ConditionalFragmentSubscription, SubSchema>
+    >().toEqualTypeOf<true>();
+    expectTypeOf<
+        GetReturnType<ConditionalFragmentSubscription, SubSchema>
+    >().toEqualTypeOf<{ tick?: string; }>();
+
     // The same rule does not apply to queries.
     expectTypeOf<IsValidGraphQL<"{ version echo }", Schema>>()
         .toEqualTypeOf<true>();

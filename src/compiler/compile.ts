@@ -113,18 +113,23 @@ export interface CompileSuccess<Result, Variables = {}> {
 type IsUnion<T, Whole = T> =
     T extends unknown ? [Whole] extends [T] ? false : true : never;
 
-// Spec §5.2.3.1: a subscription selects exactly one root field. Fragment
-// fields are already flattened into the compiled result, and merged
-// selections of one field share a response key, so counting the result's
-// keys matches the spec's CollectFields grouping.
-type SingleRootViolation<Kind extends string, Result> =
+// Subscription compatibility follows graphql-js 16 / Hasura: exactly one
+// non-introspection root field. Fragment fields are already flattened into
+// RootFields, while the materialized result groups merged selections by
+// response key for the cardinality check.
+type SingleRootViolation<Kind extends string, Result, RootFields> =
     Kind extends "subscription"
         ? true extends IsUnion<keyof Result>
             ? GraphQLError<
                 "SUBSCRIPTION_MULTIPLE_ROOT_FIELDS",
                 "a subscription must select exactly one root field"
             >
-            : never
+            : [Extract<RootFields, { field: "__typename"; }>] extends [never]
+                ? never
+                : GraphQLError<
+                    "SUBSCRIPTION_INTROSPECTION_ROOT",
+                    "a subscription root field must not be an introspection field"
+                >
         : never;
 
 type RootType<S extends GraphQLSchema, Kind extends string> =
@@ -164,8 +169,16 @@ export type CompileGraphQL<
                     Fragments
                 > extends infer Compiled
                     ? Compiled extends GraphQLError ? Compiled
-                    : Compiled extends SelectionSuccess<infer Result, infer Uses>
-                        ? [SingleRootViolation<Kind, Result>] extends [never]
+                    : Compiled extends SelectionSuccess<
+                        infer Result,
+                        infer Uses,
+                        infer RootFields
+                    >
+                        ? [SingleRootViolation<
+                            Kind,
+                            Result,
+                            RootFields
+                        >] extends [never]
                             ? ResolveVariables<
                             VariableSource,
                             Uses | OperationDirectiveUses,
@@ -175,7 +188,7 @@ export type CompileGraphQL<
                                 ? Variables extends GraphQLError ? Variables
                                 : CompileSuccess<Result, Variables>
                                 : never
-                            : SingleRootViolation<Kind, Result>
+                            : SingleRootViolation<Kind, Result, RootFields>
                         : GraphQLError<"SYNTAX_ERROR", "could not compile selection">
                     : never
                 : GraphQLError<"SYNTAX_ERROR", "could not select operation">

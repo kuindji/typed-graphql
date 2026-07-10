@@ -51,9 +51,12 @@ interface SelectionUse<Uses = never> {
     uses: Uses;
 }
 
-export interface SelectionSuccess<Fields, Uses = never> {
+// RawFields preserves original field names after result materialization so
+// operation-level rules can inspect root selections.
+export interface SelectionSuccess<Fields, Uses = never, RawFields = Fields> {
     fields: Fields;
     uses: Uses;
+    rawFields?: RawFields;
 }
 
 type SchemaType<
@@ -874,7 +877,7 @@ export type CompileSelection<
     ? HasType<S, Context> extends true
         ? RunSelection<Source, S, Context, Fragments> extends infer Result
             ? Result extends SelectionSuccess<infer Fields, infer Uses>
-                ? SelectionSuccess<MaterializeFields<Fields>, Uses>
+                ? SelectionSuccess<MaterializeFields<Fields>, Uses, Fields>
                 : Result
             : never
         : GraphQLError<"UNKNOWN_OPERATION_ROOT", `unknown root type: ${Root}`>
