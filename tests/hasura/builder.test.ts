@@ -211,7 +211,7 @@ test("an empty where filter does not bypass the update/remove guard", async () =
     expect(mock.requests).toEqual([]);
 });
 
-test("null mutation and aggregate payloads resolve null instead of throwing", async () => {
+test("null mutation and aggregate payloads preserve 1.0.x resolve behavior", async () => {
     const mock = createMockExecutor(null);
     expect(
         await userBuilder(mock.executor).eq("active", false).update({
@@ -331,6 +331,7 @@ test("subscribe() skips frames that lack the subscribed field", () => {
     mock.emit({}); // errored frame without the field — skipped
     mock.emit({ Other: [] }); // unrelated field only — skipped
     mock.emit(null); // null root data — skipped
+    mock.emit({ User: null }); // explicit-null subscribed field — skipped
     mock.emit({ User: [] }); // genuine empty list — delivered
     expect(seen).toEqual([ [ { id: "u1", email: null } ], [] ]);
 });
@@ -340,6 +341,7 @@ test("subscribe() on an aggregate skips frames missing the aggregate field inste
     const seen: unknown[] = [];
     userBuilder(mock.executor).count().subscribe((agg) => seen.push(agg));
     mock.emit({}); // must not throw "returned no payload" inside next()
+    mock.emit({ User_aggregate: null }); // errored explicit-null frame — skipped
     mock.emit({ User_aggregate: { aggregate: { count: 2 } } });
     expect(seen).toEqual([ { aggregate: { count: 2 } } ]);
 });
@@ -390,6 +392,17 @@ test("response() resolves the unwrapped payload AND the executor's error", async
     const mock = createMockExecutor(null, boom);
     const { data, error } = await userBuilder(mock.executor).response();
     expect(data).toEqual([]); // list mode unwraps a null payload to []
+    expect(error).toBe(boom);
+});
+
+test("response() preserves a mutation error when its payload is missing", async () => {
+    const boom = new Error("permission denied");
+    const mock = createMockExecutor(null, boom);
+    const { data, error } = await userBuilder(mock.executor)
+        .eq("active", false)
+        .update({ email: null })
+        .response();
+    expect(data).toBeNull();
     expect(error).toBe(boom);
 });
 

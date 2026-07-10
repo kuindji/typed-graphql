@@ -393,11 +393,14 @@ export class HasuraTableBuilder<
                 // caller's last good payload — deliver only frames that
                 // actually contain the field.
                 const rootKey = request.resultPath?.[0];
+                const rootData = data as Record<string, unknown>;
                 if (
                     data === null || data === undefined
                     || typeof data !== "object"
                     || (rootKey !== undefined
-                        && !(rootKey in (data as Record<string, unknown>)))
+                        && (!(rootKey in rootData)
+                            || rootData[rootKey] === null
+                            || rootData[rootKey] === undefined))
                 ) {
                     return;
                 }
@@ -454,11 +457,11 @@ export class HasuraTableBuilder<
             case "list":
                 return payload ?? [];
             default:
-                // Never throw on a missing payload. An errored/partial
-                // response already surfaced through the executor's onError
-                // path; resolve to the mode's empty value and let the consumer
-                // decide. insert returns a list (V[]); update/remove/aggregate
-                // a single object (null on failure).
+                // GraphQL execution errors are exposed through response(). Keep
+                // the plain awaited path compatible with 1.0.x by resolving the
+                // mode's empty value instead of converting a response error into
+                // a rejection. insert returns a list; mutation/aggregate modes
+                // return null when their payload is absent.
                 return this.state.mode === "insert"
                     ? (payload ?? [])
                     : (payload ?? null);
