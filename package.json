@@ -1,6 +1,6 @@
 {
     "name": "@kuindji/typed-graphql",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Compile-time GraphQL validation and type inference for TypeScript",
     "author": "Ivan Kuindzhi",
     "license": "MIT",
@@ -53,11 +53,15 @@
         "LICENSE"
     ],
     "scripts": {
+        "version:sync": "node scripts/sync-version.mjs",
+        "version": "npm run version:sync && git add src/version.ts",
         "typecheck": "tsc --noEmit",
         "typecheck:snc": "tsc -p tsconfig.strict-null-false.json --noEmit",
+        "prebuild": "npm run version:sync",
         "build": "tsc -p tsconfig.build.json",
         "test:dist": "npm run build && node scripts/dist-smoke.mjs",
         "prepublishOnly": "npm test && npm run test:dist",
+        "pretest": "npm run version:sync",
         "test": "tsc --noEmit && npm run typecheck:snc && npm run typecheck:stress && bun test",
         "perf": "node scripts/perf-budget.mjs",
         "perf:update": "node scripts/perf-budget.mjs --update",

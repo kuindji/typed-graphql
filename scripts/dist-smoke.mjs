@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
+const packageJson = JSON.parse(
+    readFileSync(resolve(root, "package.json"), "utf8"),
+);
 
 const failures = [];
 const fail = (msg) => failures.push(msg);
@@ -32,8 +35,10 @@ catch (err) {
     process.exit(1);
 }
 
-if (typeof api.version !== "string") {
-    fail(`missing or non-string export: version (got ${typeof api.version})`);
+if (api.version !== packageJson.version) {
+    fail(
+        `version export does not match package.json: ${api.version} !== ${packageJson.version}`,
+    );
 }
 
 // 2. The type-declaration entry point exists and is non-empty (consumers rely

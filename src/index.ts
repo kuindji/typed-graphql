@@ -4,7 +4,7 @@
 // TypeScript. The core is AST-less: it walks source strings directly and
 // returns structured diagnostics for invalid syntax or schema mismatches.
 
-export const version = "0.0.0";
+export { version } from "./version.js";
 
 export type { GraphQLError } from "./diagnostics.js";
 export type {
