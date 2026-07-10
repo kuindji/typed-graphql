@@ -198,6 +198,26 @@ test("brace-like content inside strings and comments does not trip the selection
     ).toThrow("unterminated string in selection");
 });
 
+test("a trailing selection comment cannot consume generated closing braces", () => {
+    const list = buildListRequest({
+        table: "User",
+        selection: "id # trailing",
+    });
+    expect(list.document).toBe(
+        "query ListUsers { User { id # trailing\n } }",
+    );
+
+    const insert = buildInsertRequest({
+        table: "User",
+        selection: "id # trailing",
+        data: {},
+    });
+    expect(insert.document).toBe(
+        "mutation InsertUser($input: [User_insert_input!]!) "
+            + "{ insert_User(objects: $input) { returning { id # trailing\n } } }",
+    );
+});
+
 test("aggregate column names are validated as GraphQL names", () => {
     expect(() => generateAggregateSelection({ max: [ "id) { x" ] }))
         .toThrow('invalid GraphQL name for max column: "id) { x"');

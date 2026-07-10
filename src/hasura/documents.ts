@@ -45,9 +45,10 @@ function assertGraphQLName(value: string, what: string): void {
 // `{ selection }` wrapper and plant fields or operations outside the
 // intended table field. Strings and comments are skipped so brace-like
 // argument values cannot trip the guard.
-function assertEnclosedSelection(selection: string): void {
+function prepareEnclosedSelection(selection: string): string {
     let braces = 0;
     let parens = 0;
+    let needsLineBreak = false;
     for (let i = 0; i < selection.length; i++) {
         const ch = selection[i];
         if (ch === "\"") {
@@ -74,8 +75,20 @@ function assertEnclosedSelection(selection: string): void {
             }
             i = j + (block ? 2 : 0);
         } else if (ch === "#") {
-            const newline = selection.indexOf("\n", i);
-            i = newline === -1 ? selection.length : newline;
+            let lineEnd = i + 1;
+            while (
+                lineEnd < selection.length
+                && selection[lineEnd] !== "\n"
+                && selection[lineEnd] !== "\r"
+            ) {
+                lineEnd++;
+            }
+            if (lineEnd === selection.length) {
+                needsLineBreak = true;
+                i = selection.length;
+            } else {
+                i = lineEnd;
+            }
         } else if (ch === "{") {
             braces++;
         } else if (ch === "}") {
@@ -100,6 +113,7 @@ function assertEnclosedSelection(selection: string): void {
     if (parens !== 0) {
         throw new Error(`unbalanced parentheses in selection: ${selection}`);
     }
+    return needsLineBreak ? `${selection}\n` : selection;
 }
 
 type ListRequestArgs = {
@@ -115,7 +129,7 @@ type ListRequestArgs = {
 
 export function buildListRequest(args: ListRequestArgs): GraphQLRequest {
     assertGraphQLName(args.table, "table");
-    assertEnclosedSelection(args.selection);
+    const selection = prepareEnclosedSelection(args.selection);
     const kind = args.kind ?? "query";
     const defs: VariableDefinition[] = [];
     const fieldArgs: FieldArgument[] = [];
@@ -156,7 +170,7 @@ export function buildListRequest(args: ListRequestArgs): GraphQLRequest {
             variableDefinitions: defs,
             selection: `${args.table}${
                 buildFieldArguments(fieldArgs)
-            } { ${args.selection} }`,
+            } { ${selection} }`,
         }),
         variables,
         operationName: name,
@@ -176,7 +190,7 @@ type InsertRequestArgs = {
 
 export function buildInsertRequest(args: InsertRequestArgs): GraphQLRequest {
     assertGraphQLName(args.table, "table");
-    assertEnclosedSelection(args.selection);
+    const selection = prepareEnclosedSelection(args.selection);
     const objects = Array.isArray(args.data) ? args.data : [ args.data ];
     const conflict: ConflictSpec | undefined = args.conflict === false
         ? { constraint: `${args.table}_pkey`, update_columns: [] }
@@ -201,7 +215,7 @@ export function buildInsertRequest(args: InsertRequestArgs): GraphQLRequest {
             variableDefinitions: defs,
             selection: `insert_${args.table}${
                 buildFieldArguments(fieldArgs)
-            } { returning { ${args.selection} } }`,
+            } { returning { ${selection} } }`,
         }),
         variables,
         operationName: name,
