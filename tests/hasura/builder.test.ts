@@ -129,6 +129,59 @@ test("mutating condition objects after passing them in does not affect the build
     });
 });
 
+type EventSchema = {
+    defaultSchema: "public";
+    schemas: {
+        public: {
+            Query: {};
+            Event: { id: string; created_at: Date; };
+        };
+    };
+    relations: { public: { Query: {}; Event: {}; }; };
+};
+
+function eventBuilder(executor: GraphQLExecutor) {
+    return new HasuraTableBuilder<
+        EventSchema,
+        "Event",
+        { id: string; },
+        Partial<{ id: string; created_at: Date; }>,
+        string
+    >({
+        table: "Event",
+        executor,
+        mode: "list",
+        selection: "id",
+        primaryKey: "id",
+    });
+}
+
+test("non-plain-object filter values survive capture instead of collapsing", async () => {
+    // Object.entries(new Date()) is [], so cloning a Date field-by-field
+    // replaces the filter value with {}. Class instances are leaf values.
+    const cutoff = new Date("2020-01-01T00:00:00.000Z");
+
+    const viaOperator = createMockExecutor({ Event: [] });
+    await eventBuilder(viaOperator.executor).gt("created_at", cutoff);
+    expect(viaOperator.requests[0]!.variables.where).toEqual({
+        created_at: { _gt: cutoff },
+    });
+
+    const viaWhere = createMockExecutor({ Event: [] });
+    await eventBuilder(viaWhere.executor).where({
+        created_at: { _gt: cutoff },
+    });
+    expect(viaWhere.requests[0]!.variables.where).toEqual({
+        created_at: { _gt: cutoff },
+    });
+
+    const viaList = createMockExecutor({ Event: [] });
+    await eventBuilder(viaList.executor).in("created_at", [ cutoff ]);
+    expect(viaList.requests[0]!.variables.where).toEqual({
+        created_at: { _in: [ cutoff ] },
+    });
+});
+
 test("one() forces limit 1 and resolves the first row or null", async () => {
     const row = { id: "u1" as UserId, email: null };
     const mock = createMockExecutor({ User: [ row ] });

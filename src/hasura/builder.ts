@@ -41,8 +41,17 @@ export type NoSelection = GraphQLError<
     "Call select()/customSelect() or configure a default selection for this table"
 >;
 
+// "Plain" means an object literal or Object.create(null) — a container the
+// builder may walk field by field. Class instances (Date, Decimal.js, Buffer,
+// Map, …) are leaf values: rebuilding one from Object.entries() erases it
+// (Object.entries(new Date()) is []), which silently turned a date filter
+// into `{}`. Arrays are excluded here too; cloneCondition handles them first.
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    if (typeof value !== "object" || value === null) {
+        return false;
+    }
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
 }
 
 // _and/_or accept a single bool_exp or a list; normalize to a list so
