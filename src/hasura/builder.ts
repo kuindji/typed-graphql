@@ -95,6 +95,12 @@ export interface BuilderState {
     selection: string | null;
     primaryKey: string | null;
     where?: Record<string, unknown>;
+    /** Where each column operator written by an operator method currently
+     *  lives: `-1` = the top-level column entry, `>= 0` = that index in
+     *  `where._and`. Lets a repeated operator replace its own earlier value
+     *  (documented last-wins) without ever overwriting a condition that came
+     *  from where(). */
+    operatorSlots?: Record<string, Record<string, number>>;
     order?: unknown;
     offset?: number;
     limit?: number;
@@ -174,21 +180,48 @@ export class HasuraTableBuilder<
     /** Merges operators into an existing column entry instead of replacing
      * the whole column, so chaining filters on the same column (e.g.
      * `.gt("age", 18).lt("age", 65)`) accumulates operators rather than
-     * silently dropping earlier ones. Later operators intentionally replace
-     * earlier ones of the same name, so the column is written back directly
-     * rather than through mergeWhere's collision handling. */
-    private mergeFieldOperator(
+     * silently dropping earlier ones. A repeated operator replaces its own
+     * earlier value (last-wins), but one that collides with a condition
+     * where() put there is conjoined via `_and` instead — where()'s
+     * conjunct contract holds no matter which order the calls come in.
+     * operatorSlots remembers where each owned operator ended up so the
+     * replace stays a replace even once it lives inside `_and`. */
+    private applyFieldOperator(
         field: string,
         operators: Record<string, unknown>,
-    ) {
-        const existing = this.state.where?.[field];
-        return {
-            ...this.state.where,
-            [field]: {
-                ...(isPlainObject(existing) ? existing : undefined),
-                ...cloneCondition(operators),
-            },
-        };
+    ): Partial<BuilderState> {
+        const where: Record<string, unknown> = { ...this.state.where };
+        const slots = { ...this.state.operatorSlots };
+        const fieldSlots: Record<string, number> = { ...slots[field] };
+        const conjuncts = toConditionList(where["_and"]).slice();
+        let conjunctsChanged = false;
+
+        for (const [ op, value ] of Object.entries(cloneCondition(operators))) {
+            const slot = fieldSlots[op];
+            if (slot !== undefined && slot >= 0) {
+                conjuncts[slot] = { [field]: { [op]: value } };
+                conjunctsChanged = true;
+                continue;
+            }
+            const existing = where[field];
+            const column = existing === undefined ? {}
+                : isPlainObject(existing) ? existing
+                : undefined;
+            if (column === undefined || (slot === undefined && op in column)) {
+                fieldSlots[op] = conjuncts.length;
+                conjuncts.push({ [field]: { [op]: value } });
+                conjunctsChanged = true;
+                continue;
+            }
+            where[field] = { ...column, [op]: value };
+            fieldSlots[op] = -1;
+        }
+
+        if (conjunctsChanged) {
+            where["_and"] = conjuncts;
+        }
+        slots[field] = fieldSlots;
+        return { where, operatorSlots: slots };
     }
 
     where(where: WhereInput<S, T>) {
@@ -203,36 +236,28 @@ export class HasuraTableBuilder<
         field: F,
         value: NonNullable<TableRow<S, T>[F]>,
     ) {
-        return this.next({
-            where: this.mergeFieldOperator(field, { _eq: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { _eq: value }));
     }
 
     neq<F extends TableColumn<S, T>>(
         field: F,
         value: NonNullable<TableRow<S, T>[F]>,
     ) {
-        return this.next({
-            where: this.mergeFieldOperator(field, { _neq: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { _neq: value }));
     }
 
     in<F extends TableColumn<S, T>>(
         field: F,
         value: NonNullable<TableRow<S, T>[F]>[],
     ) {
-        return this.next({
-            where: this.mergeFieldOperator(field, { _in: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { _in: value }));
     }
 
     nin<F extends TableColumn<S, T>>(
         field: F,
         value: NonNullable<TableRow<S, T>[F]>[],
     ) {
-        return this.next({
-            where: this.mergeFieldOperator(field, { _nin: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { _nin: value }));
     }
 
     gt<F extends TableColumn<S, T>>(
@@ -241,9 +266,7 @@ export class HasuraTableBuilder<
         including: boolean = false,
     ) {
         const op = including ? "_gte" : "_gt";
-        return this.next({
-            where: this.mergeFieldOperator(field, { [op]: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { [op]: value }));
     }
 
     lt<F extends TableColumn<S, T>>(
@@ -252,9 +275,7 @@ export class HasuraTableBuilder<
         including: boolean = false,
     ) {
         const op = including ? "_lte" : "_lt";
-        return this.next({
-            where: this.mergeFieldOperator(field, { [op]: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { [op]: value }));
     }
 
     like(
@@ -263,9 +284,7 @@ export class HasuraTableBuilder<
         caseSensitive: boolean = false,
     ) {
         const op = caseSensitive ? "_like" : "_ilike";
-        return this.next({
-            where: this.mergeFieldOperator(field, { [op]: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { [op]: value }));
     }
 
     nlike(
@@ -274,15 +293,11 @@ export class HasuraTableBuilder<
         caseSensitive: boolean = false,
     ) {
         const op = caseSensitive ? "_nlike" : "_nilike";
-        return this.next({
-            where: this.mergeFieldOperator(field, { [op]: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { [op]: value }));
     }
 
     isNull(field: TableColumn<S, T>, value: boolean) {
-        return this.next({
-            where: this.mergeFieldOperator(field, { _is_null: value }),
-        });
+        return this.next(this.applyFieldOperator(field, { _is_null: value }));
     }
 
     id(value: PK) {
@@ -291,11 +306,9 @@ export class HasuraTableBuilder<
                 `${this.state.table} has no primary key configured`,
             );
         }
-        return this.next({
-            where: this.mergeFieldOperator(this.state.primaryKey, {
-                _eq: value,
-            }),
-        });
+        return this.next(
+            this.applyFieldOperator(this.state.primaryKey, { _eq: value }),
+        );
     }
 
     order(order: OrderBy<S, T>) {

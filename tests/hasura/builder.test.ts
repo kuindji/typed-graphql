@@ -111,6 +111,70 @@ test("where() conjoins repeated logical and column filters instead of overwritin
     });
 });
 
+test("an operator method conjoins a colliding where() instead of dropping it", async () => {
+    // where() promises every call is a conjunct. An operator method used to
+    // write its column back directly, so a later .eq() on the same column
+    // silently deleted the where() condition — and the reverse order ANDed
+    // them, making the result depend on call order.
+    const whereThenEq = createMockExecutor({ User: [] });
+    await userBuilder(whereThenEq.executor)
+        .where({ age: { _eq: 30 } })
+        .eq("age", 40);
+    expect(whereThenEq.requests[0]!.variables.where).toEqual({
+        age: { _eq: 30 },
+        _and: [ { age: { _eq: 40 } } ],
+    });
+
+    const eqThenWhere = createMockExecutor({ User: [] });
+    await userBuilder(eqThenWhere.executor)
+        .eq("age", 40)
+        .where({ age: { _eq: 30 } });
+    expect(eqThenWhere.requests[0]!.variables.where).toEqual({
+        age: { _eq: 40 },
+        _and: [ { age: { _eq: 30 } } ],
+    });
+
+    // id() is the same path — the primary-key filter must not swallow an
+    // earlier constraint on that column.
+    const idAfterWhere = createMockExecutor({ User: [] });
+    await userBuilder(idAfterWhere.executor)
+        .where({ id: { _eq: "aaa" as UserId } })
+        .id("bbb" as UserId);
+    expect(idAfterWhere.requests[0]!.variables.where).toEqual({
+        id: { _eq: "aaa" },
+        _and: [ { id: { _eq: "bbb" } } ],
+    });
+});
+
+test("repeated operator methods still replace their own earlier value", async () => {
+    const direct = createMockExecutor({ User: [] });
+    await userBuilder(direct.executor).eq("age", 1).eq("age", 2);
+    expect(direct.requests[0]!.variables.where).toEqual({ age: { _eq: 2 } });
+
+    // Once an operator has been pushed into `_and` by a colliding where(),
+    // a later call replaces it there rather than stacking another conjunct.
+    const viaConjunct = createMockExecutor({ User: [] });
+    await userBuilder(viaConjunct.executor)
+        .where({ age: { _eq: 30 } })
+        .eq("age", 40)
+        .eq("age", 50);
+    expect(viaConjunct.requests[0]!.variables.where).toEqual({
+        age: { _eq: 30 },
+        _and: [ { age: { _eq: 50 } } ],
+    });
+
+    // A non-colliding where() merges into the column; the owned operator
+    // keeps replacing in place and leaves the where() operator alone.
+    const disjoint = createMockExecutor({ User: [] });
+    await userBuilder(disjoint.executor)
+        .eq("age", 1)
+        .where({ age: { _gt: 2 } })
+        .eq("age", 3);
+    expect(disjoint.requests[0]!.variables.where).toEqual({
+        age: { _eq: 3, _gt: 2 },
+    });
+});
+
 test("mutating condition objects after passing them in does not affect the builder", async () => {
     const mock = createMockExecutor({ User: [] });
     const condition = { age: { _gt: 18 } };
