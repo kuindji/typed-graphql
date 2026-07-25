@@ -175,6 +175,30 @@ test("repeated operator methods still replace their own earlier value", async ()
     });
 });
 
+test("repeated relation filters are conjoined, never merged into one", async () => {
+    // On a to-many relation `posts: { title, rating }` means "has ONE post
+    // that is both titled a and rated > 5", which is strictly narrower than
+    // the conjunction of the two conditions the caller wrote. Only column
+    // operator maps may merge.
+    const relation = createMockExecutor({ User: [] });
+    await userBuilder(relation.executor)
+        .where({ posts: { title: { _eq: "a" } } })
+        .where({ posts: { rating: { _gt: 5 } } });
+    expect(relation.requests[0]!.variables.where).toEqual({
+        posts: { title: { _eq: "a" } },
+        _and: [ { posts: { rating: { _gt: 5 } } } ],
+    });
+
+    // Disjoint operators on a plain column still merge, as before.
+    const column = createMockExecutor({ User: [] });
+    await userBuilder(column.executor)
+        .where({ age: { _gt: 18 } })
+        .where({ age: { _lt: 65 } });
+    expect(column.requests[0]!.variables.where).toEqual({
+        age: { _gt: 18, _lt: 65 },
+    });
+});
+
 test("mutating condition objects after passing them in does not affect the builder", async () => {
     const mock = createMockExecutor({ User: [] });
     const condition = { age: { _gt: 18 } };

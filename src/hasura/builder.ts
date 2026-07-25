@@ -54,6 +54,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return proto === Object.prototype || proto === null;
 }
 
+// A column entry in a bool_exp is a map of Hasura operators (`_eq`, `_gt`,
+// `_ilike`, …) — all underscore-prefixed. Anything else under a non-logical
+// key is a nested relation filter, and merging two of those is NOT their
+// conjunction: on a to-many relation `posts: { a, b }` asks for one related
+// row satisfying both, while two separate conditions ask for a row per
+// condition. Only operator maps may merge; relation filters are conjoined.
+function isOperatorMap(value: unknown): value is Record<string, unknown> {
+    return isPlainObject(value)
+        && Object.keys(value).every((key) =>
+            key.startsWith("_") && key !== "_and" && key !== "_or"
+            && key !== "_not"
+        );
+}
+
 // _and/_or accept a single bool_exp or a list; normalize to a list so
 // repeated conditions can concatenate.
 function toConditionList(value: unknown): unknown[] {
@@ -141,8 +155,8 @@ export class HasuraTableBuilder<
     /** Every where() call is a conjunct: repeated `_and` entries
      * concatenate, disjoint column operators merge, and anything that
      * cannot merge without changing meaning (repeated `_or`/`_not`, a
-     * colliding operator) is ANDed on via `_and` instead of overwriting
-     * the earlier condition. */
+     * colliding operator, a nested relation filter) is ANDed on via `_and`
+     * instead of overwriting the earlier condition. */
     private mergeWhere(condition: Record<string, unknown>) {
         const existing = this.state.where;
         if (existing === undefined) {
@@ -163,7 +177,7 @@ export class HasuraTableBuilder<
                 ];
             } else if (
                 key !== "_or" && key !== "_not"
-                && isPlainObject(current) && isPlainObject(value)
+                && isOperatorMap(current) && isOperatorMap(value)
                 && Object.keys(value).every((op) => !(op in current))
             ) {
                 merged[key] = { ...current, ...value };
@@ -205,7 +219,7 @@ export class HasuraTableBuilder<
             }
             const existing = where[field];
             const column = existing === undefined ? {}
-                : isPlainObject(existing) ? existing
+                : isOperatorMap(existing) ? existing
                 : undefined;
             if (column === undefined || (slot === undefined && op in column)) {
                 fieldSlots[op] = conjuncts.length;
