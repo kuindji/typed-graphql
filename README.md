@@ -87,14 +87,31 @@ The core stays type-only. Runtime query building ships as separate entries:
 - `@kuindji/typed-graphql/runtime` — the transport-neutral boundary:
   `GraphQLRequest`, `GraphQLExecutor`, `extractResult`, and document
   assembly helpers. You inject an executor that owns transport,
-  authentication, retry, and error reporting. `unwrapResponse` turns a
-  standard `{ data, errors }` envelope into root data, throwing
+  authentication, retry, and error reporting. `execute` resolves a
+  `{ data, error }` envelope: `data` is the response's root data object,
+  and `error` — surfaced to call-sites through the builder's `response()`
+  — is set when the operation failed. `unwrapResponse` turns a standard
+  `{ data, errors }` envelope into root data, throwing
   `GraphQLResponseError` when the response carries errors
   (`extractErrors` reads the list without throwing):
 
   ```ts
+  // Lenient: report the error out-of-band, let the call-site branch on it.
   const executor = {
-      execute: async (request) => unwrapResponse(await post(request)),
+      execute: async (request) => {
+          const response = await post(request);
+          return {
+              data: (response as { data?: unknown; }).data ?? null,
+              error: extractErrors(response)[0],
+          };
+      },
+  };
+
+  // Strict: reject the promise as soon as the response carries errors.
+  const strictExecutor = {
+      execute: async (request) => ({
+          data: unwrapResponse(await post(request)),
+      }),
   };
   ```
 - `@kuindji/typed-graphql/hasura` — an immutable, chainable Hasura builder
