@@ -1,4 +1,7 @@
-export interface GraphQLInput<Wire extends string, App = DefaultInputType<Wire>> {
+export interface GraphQLInput<
+    Wire extends string,
+    App = DefaultInputType<Wire>,
+> {
     readonly wire: Wire;
     readonly app?: App;
 }
@@ -30,7 +33,10 @@ export interface GraphQLSchema {
     relations?: Record<string, Record<string, Record<string, GraphQLRelation>>>;
     arguments?: Record<
         string,
-        Record<string, Record<string, Record<string, GraphQLInput<string, unknown>>>>
+        Record<
+            string,
+            Record<string, Record<string, GraphQLInput<string, unknown>>>
+        >
     >;
     rootTypes?: {
         query?: string;
@@ -47,13 +53,18 @@ export interface GraphQLSchema {
 
 type StripNonNull<T extends string> = T extends `${infer Inner}!` ? Inner : T;
 
-export type DefaultInputType<Wire extends string> =
-    StripNonNull<Wire> extends `[${infer Inner}]`
-        ? DefaultInputType<Inner>[]
-        : StripNonNull<Wire> extends "Int" | "Float" ? number
-        : StripNonNull<Wire> extends "Boolean" ? boolean
-        : StripNonNull<Wire> extends "ID" | "String" ? string
-        : unknown;
+// List items keep their own nullability: `[Int]` is `(number | null)[]`,
+// `[Int!]` is `number[]`. Top-level nullability is the variable's concern
+// (GetVariables widens a nullable variable with `| null`), so a bare `Int`
+// stays `number`.
+export type DefaultInputType<Wire extends string> = StripNonNull<Wire> extends
+    `[${infer Inner}]` ? Inner extends `${string}!` ? DefaultInputType<Inner>[]
+    : (DefaultInputType<Inner> | null)[]
+    : StripNonNull<Wire> extends "Int" | "Float" ? number
+    : StripNonNull<Wire> extends "Boolean" ? boolean
+    : StripNonNull<Wire> extends "ID" | "String" ? string
+    : unknown;
 
-export type InputApplicationType<T> =
-    T extends GraphQLInput<string, infer App> ? App : never;
+export type InputApplicationType<T> = T extends GraphQLInput<string, infer App>
+    ? App
+    : never;

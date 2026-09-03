@@ -1,15 +1,15 @@
-import { expectTypeOf } from "expect-type";
 import { test } from "bun:test";
+import { expectTypeOf } from "expect-type";
 import type {
-    GetVariables,
-    GraphQLInput,
     GetReturnType,
     GetSelectionType,
+    GetVariables,
+    GraphQLInput,
     IsValidGraphQL,
     ValidateGraphQL,
 } from "../../src/index.js";
 
-type UserId = string & { readonly __userId: unique symbol };
+type UserId = string & { readonly __userId: unique symbol; };
 
 type Schema = {
     defaultSchema: "public";
@@ -200,7 +200,7 @@ type AdvancedSchema = {
 
 test("direct compiler infers fields, aliases, relations, and nullability", () => {
     type Result = GetReturnType<
-        'query Q($id: ID!) { apiVersion: version user(id: $id) { id name posts { id } } }',
+        "query Q($id: ID!) { apiVersion: version user(id: $id) { id name posts { id } } }",
         Schema
     >;
 
@@ -209,7 +209,7 @@ test("direct compiler infers fields, aliases, relations, and nullability", () =>
         user: {
             id: string;
             name: string | null;
-            posts: { id: string }[];
+            posts: { id: string; }[];
         } | null;
     }>();
 });
@@ -219,13 +219,15 @@ test("direct compiler validates schema selections", () => {
         .toEqualTypeOf<true>();
     expectTypeOf<IsValidGraphQL<"{ missing }", Schema>>()
         .toEqualTypeOf<false>();
-    expectTypeOf<ValidateGraphQL<'query Q($id: ID!) { user(id: $id) }', Schema>>()
+    expectTypeOf<
+        ValidateGraphQL<"query Q($id: ID!) { user(id: $id) }", Schema>
+    >()
         .toMatchTypeOf<{ code: "MISSING_SELECTION"; }>();
 });
 
 test("partial selections share the same compiler", () => {
     expectTypeOf<GetSelectionType<"id posts { id }", Schema, "User">>()
-        .toEqualTypeOf<{ id: string; posts: { id: string }[] }>();
+        .toEqualTypeOf<{ id: string; posts: { id: string; }[]; }>();
 });
 
 test("fragments compile without an AST", () => {
@@ -235,7 +237,7 @@ test("fragments compile without an AST", () => {
         "Q"
     >;
     expectTypeOf<Result>().toEqualTypeOf<{
-        user: { id: string; name: string | null } | null;
+        user: { id: string; name: string | null; } | null;
     }>();
 });
 
@@ -243,7 +245,7 @@ test("arguments and variables are validated and inferred in the same pass", () =
     type Query = "query User($id: ID!) { user(id: $id) { id } }";
 
     expectTypeOf<GetVariables<Query, Schema>>()
-        .toEqualTypeOf<{ id: UserId }>();
+        .toEqualTypeOf<{ id: UserId; }>();
     expectTypeOf<IsValidGraphQL<Query, Schema>>().toEqualTypeOf<true>();
     expectTypeOf<
         ValidateGraphQL<'query Q { user(id: "raw") { id } }', Schema>
@@ -254,32 +256,32 @@ test("arguments and variables are validated and inferred in the same pass", () =
 });
 
 test("a variable used at multiple branded positions intersects their application types", () => {
-    type UserId = string & { readonly __brand: "User" };
-    type PostId = string & { readonly __brand: "Post" };
+    type UserId = string & { readonly __brand: "User"; };
+    type PostId = string & { readonly __brand: "Post"; };
 
     type BrandSchema = {
         defaultSchema: "public";
         schemas: {
             public: {
-                Query: { version: string; pick: string };
-                User: { id: UserId };
-                Post: { id: PostId };
+                Query: { version: string; pick: string; };
+                User: { id: UserId; };
+                Post: { id: PostId; };
             };
         };
         relations: {
             public: {
                 Query: {
-                    user: { type: "User"; nullable: true };
-                    post: { type: "Post"; nullable: true };
+                    user: { type: "User"; nullable: true; };
+                    post: { type: "Post"; nullable: true; };
                 };
             };
         };
         arguments: {
             public: {
                 Query: {
-                    user: { id: GraphQLInput<"ID!", UserId> };
-                    post: { id: GraphQLInput<"ID!", PostId> };
-                    pick: { kind: GraphQLInput<"Kind!", "a" | "b"> };
+                    user: { id: GraphQLInput<"ID!", UserId>; };
+                    post: { id: GraphQLInput<"ID!", PostId>; };
+                    pick: { kind: GraphQLInput<"Kind!", "a" | "b">; };
                 };
             };
         };
@@ -291,20 +293,20 @@ test("a variable used at multiple branded positions intersects their application
     type SharedVar =
         "query Q($id: ID!) { user(id: $id) { id } post(id: $id) { id } }";
     expectTypeOf<GetVariables<SharedVar, BrandSchema>>()
-        .toEqualTypeOf<{ id: UserId & PostId }>();
+        .toEqualTypeOf<{ id: UserId & PostId; }>();
 
     // A union that lives inside a single use's application type must be
     // preserved as a union, not collapsed by the cross-use intersection.
     type SingleUnionUse = "query Q($k: Kind!) { pick(kind: $k) }";
     expectTypeOf<GetVariables<SingleUnionUse, BrandSchema>>()
-        .toEqualTypeOf<{ k: "a" | "b" }>();
+        .toEqualTypeOf<{ k: "a" | "b"; }>();
 });
 
 test("directive variables are collected and unused variables are rejected", () => {
     type Query = "query Q($show: Boolean!) { version @include(if: $show) }";
 
     expectTypeOf<GetVariables<Query, Schema>>()
-        .toEqualTypeOf<{ show: boolean }>();
+        .toEqualTypeOf<{ show: boolean; }>();
     expectTypeOf<IsValidGraphQL<Query, Schema>>().toEqualTypeOf<true>();
     expectTypeOf<
         ValidateGraphQL<"query Q($unused: Boolean!) { version }", Schema>
@@ -329,8 +331,11 @@ test("variable defaults are validated against declared input types", () => {
 
     expectTypeOf<IsValidGraphQL<NullableWithDefault, AdvancedSchema>>()
         .toEqualTypeOf<true>();
+    // The nullable variable reaches the non-null `flag: Boolean!` argument
+    // only through its default (spec §5.8.5); an explicit null there is a
+    // field error at execution time, so the variables type must not widen.
     expectTypeOf<GetVariables<NullableWithDefault, AdvancedSchema>>()
-        .toEqualTypeOf<{ flag?: boolean | null; }>();
+        .toEqualTypeOf<{ flag?: boolean; }>();
 
     // Optional only because of the default — the non-null wire type still
     // rejects an explicit null.
@@ -354,7 +359,7 @@ test("variable defaults are validated against declared input types", () => {
 
     expectTypeOf<
         ValidateGraphQL<
-            'query Q($filter: SearchFilter = { ids: [false] }) { search(filter: $filter) }',
+            "query Q($filter: SearchFilter = { ids: [false] }) { search(filter: $filter) }",
             AdvancedSchema
         >
     >().toMatchTypeOf<{ code: "INVALID_ARGUMENT_VALUE"; }>();
@@ -420,7 +425,7 @@ test("duplicate selections of the same field merge their sub-selections", () => 
 
     expectTypeOf<IsValidGraphQL<Dup, Schema>>().toEqualTypeOf<true>();
     expectTypeOf<GetReturnType<Dup, Schema>>().toEqualTypeOf<{
-        user: { id: string; name: string | null } | null;
+        user: { id: string; name: string | null; } | null;
     }>();
 
     type Nested =
@@ -428,14 +433,14 @@ test("duplicate selections of the same field merge their sub-selections", () => 
 
     expectTypeOf<IsValidGraphQL<Nested, Schema>>().toEqualTypeOf<true>();
     expectTypeOf<GetReturnType<Nested, Schema>>().toEqualTypeOf<{
-        user: { posts: { a: string; b: string }[] } | null;
+        user: { posts: { a: string; b: string; }[]; } | null;
     }>();
 
     type ViaFragment =
         "query Q($id: ID!) { user(id: $id) { id } ...Extra } fragment Extra on Query { user(id: $id) { name } }";
 
     expectTypeOf<GetReturnType<ViaFragment, Schema>>().toEqualTypeOf<{
-        user: { id: string; name: string | null } | null;
+        user: { id: string; name: string | null; } | null;
     }>();
 
     expectTypeOf<
@@ -464,7 +469,7 @@ test("multi-operation documents require an operation name", () => {
             Schema,
             "B"
         >
-    >().toEqualTypeOf<{ apiVersion: string }>();
+    >().toEqualTypeOf<{ apiVersion: string; }>();
 });
 
 test("nested input object and list literals are validated recursively", () => {
@@ -484,7 +489,7 @@ test("nested input object and list literals are validated recursively", () => {
 
     expectTypeOf<
         ValidateGraphQL<
-            '{ search(filter: { nested: { limit: 3 } }) }',
+            "{ search(filter: { nested: { limit: 3 } }) }",
             AdvancedSchema
         >
     >().toMatchTypeOf<{ code: "MISSING_REQUIRED_ARGUMENT"; }>();
@@ -511,10 +516,13 @@ test("custom directive metadata validates arguments and locations", () => {
     expectTypeOf<IsValidGraphQL<Query, AdvancedSchema>>()
         .toEqualTypeOf<true>();
     expectTypeOf<GetVariables<Query, AdvancedSchema>>()
-        .toEqualTypeOf<{ flag: boolean }>();
+        .toEqualTypeOf<{ flag: boolean; }>();
 
     expectTypeOf<
-        ValidateGraphQL<'{ search(filter: { ids: ["1"] }) @client }', AdvancedSchema>
+        ValidateGraphQL<
+            '{ search(filter: { ids: ["1"] }) @client }',
+            AdvancedSchema
+        >
     >().toMatchTypeOf<{ code: "MISSING_REQUIRED_ARGUMENT"; }>();
 
     expectTypeOf<
@@ -526,18 +534,18 @@ test("custom directive metadata validates arguments and locations", () => {
 
     expectTypeOf<
         ValidateGraphQL<
-            'query Q { results { ... on User @client(flag: true) { name } } }',
+            "query Q { results { ... on User @client(flag: true) { name } } }",
             AdvancedSchema
         >
     >().toMatchTypeOf<{ code: "INVALID_DIRECTIVE_LOCATION"; }>();
 
     type DocumentDirectiveQuery =
-        'query Q($flag: Boolean!) @operationTag(flag: $flag) { node { ...NodeFields } } fragment NodeFields on Node @fragmentTag(flag: $flag) { id }';
+        "query Q($flag: Boolean!) @operationTag(flag: $flag) { node { ...NodeFields } } fragment NodeFields on Node @fragmentTag(flag: $flag) { id }";
 
     expectTypeOf<IsValidGraphQL<DocumentDirectiveQuery, AdvancedSchema>>()
         .toEqualTypeOf<true>();
     expectTypeOf<GetVariables<DocumentDirectiveQuery, AdvancedSchema>>()
-        .toEqualTypeOf<{ flag: boolean }>();
+        .toEqualTypeOf<{ flag: boolean; }>();
 
     expectTypeOf<
         ValidateGraphQL<

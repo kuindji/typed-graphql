@@ -68,18 +68,32 @@ function isOperatorMap(value: unknown): value is Record<string, unknown> {
         );
 }
 
+// True for a bool_exp that constrains nothing: `{}`, `{ _and: [] }`, or an
+// `_and` whose every entry is itself unconstrained. Any other key (a column
+// operator, a relation filter, `_or`, `_not`) counts as a filter.
+function isEmptyBoolExp(value: unknown): boolean {
+    if (!isPlainObject(value)) {
+        return false;
+    }
+    return Object.entries(value).every(([ key, entry ]) =>
+        key === "_and" && toConditionList(entry).every(isEmptyBoolExp)
+    );
+}
+
 // _and/_or accept a single bool_exp or a list; normalize to a list so
 // repeated conditions can concatenate.
 function toConditionList(value: unknown): unknown[] {
-    return value === undefined ? []
-        : Array.isArray(value) ? value
+    return value === undefined
+        ? []
+        : Array.isArray(value)
+        ? value
         : [ value ];
 }
 
-// Detach captured filters from caller-owned objects so mutating a condition
-// after passing it in cannot reach into the builder's state. Only plain
-// object/array containers are copied; leaf values (primitives, Dates,
-// custom scalars) stay by reference.
+// Detach captured payloads (filters, ordering, insert/update data, conflict
+// specs) from caller-owned objects so mutating one after passing it in cannot
+// reach into the builder's state. Only plain object/array containers are
+// copied; leaf values (primitives, Dates, custom scalars) stay by reference.
 function cloneCondition<T>(value: T): T {
     if (Array.isArray(value)) {
         return value.map(cloneCondition) as T;
@@ -175,18 +189,23 @@ export class HasuraTableBuilder<
                     ...toConditionList(current),
                     ...toConditionList(value),
                 ];
-            } else if (
+            }
+            else if (
                 key !== "_or" && key !== "_not"
                 && isOperatorMap(current) && isOperatorMap(value)
                 && Object.keys(value).every((op) => !(op in current))
             ) {
                 merged[key] = { ...current, ...value };
-            } else {
+            }
+            else {
                 conjuncts.push({ [key]: value });
             }
         }
         if (conjuncts.length > 0) {
-            merged["_and"] = [ ...toConditionList(merged["_and"]), ...conjuncts ];
+            merged["_and"] = [
+                ...toConditionList(merged["_and"]),
+                ...conjuncts,
+            ];
         }
         return merged;
     }
@@ -218,8 +237,10 @@ export class HasuraTableBuilder<
                 continue;
             }
             const existing = where[field];
-            const column = existing === undefined ? {}
-                : isOperatorMap(existing) ? existing
+            const column = existing === undefined
+                ? {}
+                : isOperatorMap(existing)
+                ? existing
                 : undefined;
             if (column === undefined || (slot === undefined && op in column)) {
                 fieldSlots[op] = conjuncts.length;
@@ -326,7 +347,7 @@ export class HasuraTableBuilder<
     }
 
     order(order: OrderBy<S, T>) {
-        return this.next({ order });
+        return this.next({ order: cloneCondition(order) });
     }
 
     offset(offset: number) {
@@ -363,17 +384,20 @@ export class HasuraTableBuilder<
     }
 
     insert(data: Insert | Insert[]) {
-        return this.next<V, false, false>({ mode: "insert", data });
+        return this.next<V, false, false>({
+            mode: "insert",
+            data: cloneCondition(data),
+        });
     }
 
     onConflict(conflict: ConflictSpec | false) {
-        return this.next({ conflict });
+        return this.next({ conflict: cloneCondition(conflict) });
     }
 
     update(data: Partial<Insert>) {
         return this.next<{ affected_rows: number; }, true, false>({
             mode: "update",
-            data,
+            data: cloneCondition(data),
         });
     }
 
@@ -504,11 +528,12 @@ export class HasuraTableBuilder<
         }
     }
 
-    /** An empty _bool_exp matches every row, so a `{}` where must not
-     * satisfy the whole-table mutation guard any more than a missing one. */
+    /** An empty _bool_exp matches every row, so a `{}` where — or one made
+     * only of empty `_and` lists, which Hasura also evaluates to true — must
+     * not satisfy the whole-table mutation guard any more than a missing one. */
     private hasWhereFilter(): boolean {
         return this.state.where !== undefined
-            && Object.keys(this.state.where).length > 0;
+            && !isEmptyBoolExp(this.state.where);
     }
 
     private requireSelection(): string {

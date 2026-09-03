@@ -196,12 +196,14 @@ export type TableAggregateInput<
     sum?: NonEmptyArray<NumericColumn<S, T>>;
 };
 
+// Hasura's max/min/avg/sum fields are nullable: they resolve to null when
+// no row matches the filter.
 type AggregateColumns<
     S extends GraphQLSchema,
     T extends HasuraTableName<S>,
     Columns,
 > = Columns extends readonly (infer C)[]
-    ? { [K in C & TableColumn<S, T>]: TableRow<S, T>[K]; }
+    ? { [K in C & TableColumn<S, T>]: TableRow<S, T>[K] | null; }
     : never;
 
 export type TableAggregateOutput<

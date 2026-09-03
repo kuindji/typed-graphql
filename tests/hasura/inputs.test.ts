@@ -88,8 +88,9 @@ test("TableAggregateOutput derives from the aggregate input", () => {
         "User",
         { count: true; max: [ "age" ]; }
     >;
+    // max/min/avg/sum resolve to null when no row matches the filter.
     expectTypeOf<Out>().toEqualTypeOf<{
         count: number;
-        max: { age: number; };
+        max: { age: number | null; };
     }>();
 });
